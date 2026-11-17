@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "railseek",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-11-01",
+  "kv_namespaces": [{ "binding": "KV", "id": "0c04b441a9694db28528453f52d42c5a" }],
+  "vars": {
+    // live requests the shared RapidAPI key may spend per calendar month (free plan: 10)
+    "MONTHLY_CAP": "10",
+    // most live requests one check may spend
+    "SEARCH_CAP": "8",
+    // live searches one visitor may start per day
+    "VISITOR_DAILY_LIVE": "20"
+  }
+}

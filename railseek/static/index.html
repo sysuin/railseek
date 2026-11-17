@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>railseek</title>
+<style>
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f0f2f5; --text: #131722; --muted: #5a6475;
+  --border: #e1e5eb; --accent: #1d4ed8; --accent-text: #ffffff; --accent-soft: #e8eefc;
+  --ok: #0b6b45; --ok-bg: #e2f4ea; --rac: #8a5600; --rac-bg: #fcefd2; --wl: #1e45b8; --wl-bg: #e6ecfc;
+  --closed: #667085; --closed-bg: #eceef2; --warn: #8a4b00; --warn-bg: #fdf3e0; --err: #a4262c; --err-bg: #fde8e8;
+  --shadow: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
+  --radius: 10px;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --surface: #161a21; --surface-2: #1d222b; --text: #e7eaf0; --muted: #98a2b3;
+    --border: #272d38; --accent: #7c9cff; --accent-text: #0b1020; --accent-soft: #1b2440;
+    --ok: #6fd6a4; --ok-bg: #11301f; --rac: #f2c063; --rac-bg: #33270d; --wl: #9db4ff; --wl-bg: #1a2444;
+    --closed: #98a2b3; --closed-bg: #222834; --warn: #f2c063; --warn-bg: #2e240f; --err: #ff9a9a; --err-bg: #3a1618;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+button, input, select { font: inherit; color: inherit; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+header.top { border-bottom: 1px solid var(--border); background: var(--surface); }
+header.top .wrap { display: flex; align-items: center; gap: 14px; height: 58px; }
+.brand { font-weight: 700; font-size: 18px; letter-spacing: -.01em; display: flex; align-items: center; gap: 9px; }
+.brand svg { color: var(--accent); }
+.tagline { color: var(--muted); font-size: 13px; }
+.spacer { flex: 1; }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--closed-bg); color: var(--closed); white-space: nowrap; }
+.badge.live { background: var(--ok-bg); color: var(--ok); }
+.badge.demo { background: var(--rac-bg); color: var(--rac); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+main { padding: 22px 0 60px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+form.search { padding: 18px; }
+.row { display: grid; gap: 12px; grid-template-columns: 1fr 36px 1fr 170px 150px auto; align-items: end; }
+label.f { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 600; color: var(--muted); min-width: 0; }
+input[type=text], input[type=date], input[type=number], select {
+  height: 40px; padding: 0 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); width: 100%; font-size: 15px; color: var(--text);
+}
+input.code { text-transform: uppercase; font-weight: 600; letter-spacing: .04em; }
+input.code::placeholder { font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--muted); opacity: .8; }
+input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.swap { height: 40px; width: 36px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); cursor: pointer; color: var(--muted); display: grid; place-items: center; }
+.swap:hover { color: var(--text); background: var(--surface-2); }
+.btn { height: 40px; padding: 0 18px; border-radius: 8px; border: 1px solid transparent; background: var(--accent); color: var(--accent-text); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; text-decoration: none; }
+.btn:hover { filter: brightness(1.07); }
+.btn:disabled { opacity: .6; cursor: default; filter: none; }
+.btn.ghost { background: transparent; color: var(--text); border-color: var(--border); }
+.btn.ghost:hover { background: var(--surface-2); filter: none; }
+.sub { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-top: 14px; }
+.sub .lbl { font-size: 12px; font-weight: 600; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); }
+.chip[aria-pressed=true] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.hint { font-size: 12px; color: var(--muted); }
+details.more { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+details.more > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); list-style: none; display: inline-flex; align-items: center; gap: 6px; border-radius: 4px; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: "▸"; font-size: 11px; }
+details.more[open] > summary::before { content: "▾"; }
+.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 12px; }
+.check { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.check input { width: 16px; height: 16px; accent-color: var(--accent); }
+.banner { border-radius: 8px; padding: 10px 14px; font-size: 14px; margin-top: 14px; display: flex; gap: 10px; }
+.banner.demo, .banner.warn { background: var(--warn-bg); color: var(--warn); }
+.banner.err { background: var(--err-bg); color: var(--err); }
+.banner.alert { background: var(--ok-bg); color: var(--ok); font-weight: 600; }
+.summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin: 26px 2px 10px; }
+.summary h2 { font-size: 18px; margin: 0; letter-spacing: -.01em; }
+.summary .meta { color: var(--muted); font-size: 13px; }
+.list { overflow: hidden; }
+.opt { display: grid; grid-template-columns: 30px minmax(0,1.5fr) minmax(0,1.1fr) minmax(0,1.2fr) 84px 18px; gap: 4px 14px; align-items: center; width: 100%; text-align: left; padding: 14px 16px; background: none; border: 0; border-top: 1px solid var(--border); cursor: pointer; }
+.opt:first-child { border-top: 0; }
+.opt:hover { background: var(--surface-2); }
+.rank { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.t1 { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t2 { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pair { font-weight: 600; font-variant-numeric: tabular-nums; }
+.pair .arrow { color: var(--muted); font-weight: 400; margin: 0 3px; }
+.st { display: inline-block; padding: 3px 9px; border-radius: 6px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.st.available { background: var(--ok-bg); color: var(--ok); }
+.st.rac { background: var(--rac-bg); color: var(--rac); }
+.st.waitlist { background: var(--wl-bg); color: var(--wl); }
+.st.closed { background: var(--closed-bg); color: var(--closed); }
+.fare { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.chev { color: var(--muted); }
+.how { grid-column: 2 / -1; font-size: 13px; color: var(--muted); }
+.tag { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); margin-right: 8px; }
+.tag.exact { color: var(--muted); }
+details.closed { margin-top: 14px; }
+details.closed > summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 6px 2px; border-radius: 4px; }
+details.closed .opt { cursor: default; padding: 9px 16px; }
+details.closed .opt:hover { background: none; }
+.empty { padding: 36px 24px; text-align: center; color: var(--muted); }
+.empty h3 { color: var(--text); margin: 0 0 6px; font-size: 16px; }
+.intro { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; }
+.intro .card { padding: 16px 18px; }
+.intro h3 { margin: 0 0 4px; font-size: 14px; }
+.intro p { margin: 0; color: var(--muted); font-size: 13.5px; }
+.foot { margin-top: 18px; font-size: 12.5px; color: var(--muted); }
+.spin { width: 15px; height: 15px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: sp .7s linear infinite; }
+@keyframes sp { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2s; } .drawer { transition: none !important; } }
+/* drawer */
+.scrim { position: fixed; inset: 0; background: rgba(8,12,20,.45); opacity: 0; pointer-events: none; transition: opacity .18s; z-index: 10; }
+.scrim.on { opacity: 1; pointer-events: auto; }
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 100vw); background: var(--surface); border-left: 1px solid var(--border); transform: translateX(100%); transition: transform .2s ease; z-index: 11; display: flex; flex-direction: column; }
+.drawer.on { transform: none; }
+.drawer header { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.drawer header h2 { margin: 0; font-size: 17px; }
+.drawer header p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+.x { margin-left: auto; width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-size: 18px; line-height: 1; flex: none; }
+.x:hover { background: var(--surface-2); }
+.drawer .body { overflow-y: auto; padding: 4px 18px 28px; }
+.drawer h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 8px; }
+dl.fields { margin: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+dl.fields > div { display: grid; grid-template-columns: 92px 1fr; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--border); }
+dl.fields > div:first-child { border-top: 0; }
+dl.fields dt { color: var(--muted); font-size: 13px; }
+dl.fields dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+dl.fields dd small { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; }
+dl.fields > div.key { background: var(--accent-soft); }
+.drawer ol, .drawer ul { margin: 0; padding-left: 20px; }
+.drawer li { margin: 5px 0; overflow-wrap: anywhere; }
+ul.plain { list-style: none; padding: 0; }
+ul.caution { list-style: none; padding: 10px 12px; background: var(--warn-bg); color: var(--warn); border-radius: 8px; }
+ul.caution li { margin: 4px 0; }
+ul.ready label { display: flex; gap: 9px; align-items: flex-start; cursor: pointer; }
+ul.ready input { margin-top: 4px; accent-color: var(--accent); flex: none; }
+ul.tl { list-style: none; padding: 0; margin: 0; }
+ul.tl li { display: grid; grid-template-columns: 128px 1fr; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border); margin: 0; font-size: 13.5px; }
+ul.tl li:first-child { border-top: 0; }
+ul.tl .when { color: var(--muted); font-variant-numeric: tabular-nums; }
+ul.tl .rel { display: block; font-size: 12px; }
+ul.tl li.passed { opacity: .55; }
+ul.tl li.next .lab { font-weight: 700; }
+ul.tl li.next .rel { color: var(--accent); font-weight: 600; }
+ul.tl small { display: block; color: var(--muted); font-size: 12px; }
+.actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+@media (max-width: 860px) {
+  .row { grid-template-columns: 1fr 36px 1fr; }
+  .row .wide { grid-column: 1 / -1; }
+  .grid { grid-template-columns: repeat(2, 1fr); }
+  .intro { grid-template-columns: 1fr; }
+  .tagline { display: none; }
+  .opt { grid-template-columns: 24px minmax(0,1fr) auto; }
+  .opt .fare { grid-column: 3; grid-row: 1; align-self: start; }
+  .opt .c-book { grid-column: 2; grid-row: 2; }
+  .opt .c-status { grid-column: 3; grid-row: 2; text-align: right; }
+  .opt .rank { align-self: start; }
+  .opt .t1 { white-space: normal; }
+  .opt .chev { display: none; }
+  .how { grid-column: 2 / -1; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 11h14M9 21l2-4M15 21l-2-4M9 14.5h.01M15 14.5h.01"/></svg>
+      railseek
+    </div>
+    <span class="tagline">Find a bookable seat when the direct search says no</span>
+    <span class="spacer"></span>
+    <span id="source" class="badge"><span class="dot"></span><span id="source-text">Loading</span></span>
+  </div>
+</header>
+
+<main class="wrap">
+  <form class="card search" id="form" autocomplete="off">
+    <div class="row">
+      <label class="f">From
+        <input class="code" type="text" id="origin" placeholder="Station code, e.g. SSM" maxlength="6" required>
+      </label>
+      <button type="button" class="swap" id="swap" title="Swap stations" aria-label="Swap From and To">⇄</button>
+      <label class="f">To
+        <input class="code" type="text" id="dest" placeholder="Station code, e.g. NDLS" maxlength="6" required>
+      </label>
+      <label class="f">Date
+        <input type="date" id="date" required>
+      </label>
+      <label class="f">Quota
+        <select id="quota">
+          <option value="GN">General</option>
+          <option value="TQ">Tatkal</option>
+          <option value="GN,TQ">General and Tatkal</option>
+          <option value="LD">Ladies</option>
+          <option value="SS">Senior citizen</option>
+        </select>
+      </label>
+      <button class="btn wide" id="go" type="submit">Search</button>
+    </div>
+
+    <div class="sub">
+      <span class="lbl">Classes</span>
+      <div class="chips" id="classes" role="group" aria-label="Classes"></div>
+      <span class="hint" id="class-hint">None selected checks every class the train has.</span>
+    </div>
+
+    <details class="more" id="more">
+      <summary>More options</summary>
+      <div class="grid">
+        <label class="f">Other start stations
+          <input class="code" type="text" id="also_from" placeholder="e.g. DDU, GAYA">
+        </label>
+        <label class="f">Other arrival stations
+          <input class="code" type="text" id="also_to" placeholder="e.g. DLI, ANVT">
+        </label>
+        <label class="f">Only these trains
+          <input class="code" type="text" id="trains" placeholder="e.g. 12801, 12397">
+        </label>
+        <label class="f">Request limit per search
+          <input type="number" id="max_requests" min="1" max="500" value="60">
+        </label>
+        <label class="f">Earlier stations to try
+          <input type="number" id="upstream" min="0" max="6" value="3">
+        </label>
+        <label class="f">Later stations to try
+          <input type="number" id="downstream" min="0" max="3" value="1">
+        </label>
+        <label class="f">Two-ticket splits to try
+          <input type="number" id="splits" min="0" max="3" value="0">
+        </label>
+        <label class="f">Data
+          <span class="check" style="height:40px"><input type="checkbox" id="demo"> Use demo data</span>
+        </label>
+      </div>
+    </details>
+
+    <div class="sub" style="border-top:1px solid var(--border); padding-top:12px">
+      <label class="check"><input type="checkbox" id="watch"> Keep watching and alert me when something opens up</label>
+      <label class="check">every
+        <select id="every" style="width:auto;height:32px" aria-label="Minutes between checks">
+          <option value="10">10 min</option><option value="15" selected>15 min</option><option value="30">30 min</option><option value="60">60 min</option>
+        </select>
+      </label>
+      <span class="hint" id="watch-status"></span>
+    </div>
+  </form>
+
+  <div id="banners"></div>
+  <div id="alerts"></div>
+  <div id="out">
+    <div class="intro">
+      <div class="card"><h3>Same train, other station pairs</h3><p>Books from an earlier station or to a later one, where a different quota may still have seats, and tells you the boarding point to set.</p></div>
+      <div class="card"><h3>Every train and class at once</h3><p>Checks all trains on the route, nearby stations and every class, then ranks what is actually bookable.</p></div>
+      <div class="card"><h3>You book, on IRCTC</h3><p>Each result opens a booking sheet with the exact values and steps. railseek never logs in or pays for you.</p></div>
+    </div>
+  </div>
+  <p class="foot">Availability comes from an unofficial data source and can be out of date. Confirm on IRCTC before paying. Timings follow reported 2025-26 rules and are a guide.</p>
+</main>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="d-title" aria-hidden="true">
+  <header>
+    <div><h2 id="d-title"></h2><p id="d-sub"></p></div>
+    <button class="x" id="d-close" aria-label="Close">×</button>
+  </header>
+  <div class="body" id="d-body"></div>
+</aside>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid !== null && kid !== undefined && kid !== false) el.append(kid);
+  return el;
+}
+const KIND = { "exact": "Direct", "earlier-origin": "Earlier origin", "later-destination": "Later destination", "both-extended": "Extended both ends", "alt-station": "Nearby station", "split": "Two tickets" };
+const rupee = n => "₹" + new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n);
+const shortDate = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+let meta = null, last = null, timer = null, nextAt = 0, busy = false, lastFocus = null;
+
+/* ---------- form ---------- */
+const FIELDS = ["origin", "dest", "date", "quota", "also_from", "also_to", "trains", "max_requests", "upstream", "downstream", "splits", "every"];
+function selectedClasses() { return [...document.querySelectorAll("#classes .chip[aria-pressed=true]")].map(c => c.dataset.cls); }
+function payload() {
+  return {
+    origin: $("origin").value.trim(), dest: $("dest").value.trim(), date: $("date").value,
+    quotas: $("quota").value.split(","), classes: selectedClasses(),
+    also_from: $("also_from").value, also_to: $("also_to").value, trains: $("trains").value,
+    max_requests: +$("max_requests").value, upstream: +$("upstream").value, downstream: +$("downstream").value,
+    splits: +$("splits").value, demo: $("demo").checked, every: +$("every").value,
+  };
+}
+function save() {
+  try {
+    const d = {}; FIELDS.forEach(f => d[f] = $(f).value); d.classes = selectedClasses();
+    localStorage.setItem("railseek.form", JSON.stringify(d));
+  } catch (e) {}
+}
+function restore() {
+  try {
+    const d = JSON.parse(localStorage.getItem("railseek.form") || "null");
+    if (!d) return;
+    FIELDS.forEach(f => { if (d[f] !== undefined && f !== "date") $(f).value = d[f]; });
+    if (d.date && d.date >= meta.today && d.date <= meta.max_date) $("date").value = d.date;
+    (d.classes || []).forEach(c => { const el = document.querySelector(`#classes .chip[data-cls="${CSS.escape(c)}"]`); if (el) el.setAttribute("aria-pressed", "true"); });
+  } catch (e) {}
+}
+function setSource() {
+  const demo = $("demo").checked;
+  $("source").className = "badge " + (demo ? "demo" : "live");
+  $("source-text").textContent = demo ? "Demo data" : "Live data";
+}
+async function init() {
+  meta = await (await fetch("/api/meta")).json();
+  const box = $("classes");
+  meta.classes.forEach(c => box.append(h("button", { type: "button", class: "chip", "aria-pressed": "false", "data-cls": c, onclick: e => {
+    const b = e.currentTarget; b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true"); } }, c)));
+  const d = $("date"); d.min = meta.today; d.max = meta.max_date;
+  const t = new Date(meta.today + "T00:00:00"); t.setDate(t.getDate() + 1);
+  d.value = [t.getFullYear(), String(t.getMonth() + 1).padStart(2, "0"), String(t.getDate()).padStart(2, "0")].join("-");
+  restore();
+  if (!meta.has_key) {
+    $("demo").checked = true; $("demo").disabled = true;
+    banner("demo", "No API key is set up, so searches use invented demo data. Add RAPIDAPI_KEY to the .env file and restart to use live data.", true);
+  }
+  $("every").querySelectorAll("option").forEach(o => { if (+o.value < meta.min_watch_minutes) o.remove(); });
+  setSource();
+}
+$("demo").addEventListener("change", setSource);
+$("swap").addEventListener("click", () => { const a = $("origin").value; $("origin").value = $("dest").value; $("dest").value = a; });
+
+/* ---------- banners ---------- */
+function banner(kind, text, sticky) {
+  const el = h("div", { class: "banner " + kind, role: kind === "err" ? "alert" : "status" }, text);
+  if (sticky) el.dataset.sticky = "1";
+  $("banners").append(el);
+}
+function clearBanners() { [...$("banners").children].forEach(c => { if (!c.dataset.sticky) c.remove(); }); }
+
+/* ---------- search ---------- */
+async function run(watching) {
+  if (busy) return;
+  busy = true; clearBanners(); save();
+  const go = $("go");
+  go.disabled = true; go.replaceChildren(h("span", { class: "spin" }), watching ? "Checking" : "Searching");
+  if (!last) $("out").replaceChildren(h("div", { class: "card empty" }, h("h3", {}, "Checking trains, station pairs and classes"),
+    h("div", {}, $("demo").checked ? "One moment." : "Live data is paced at one request a second, so this can take a minute or two.")));
+  try {
+    const res = await fetch(watching ? "/api/watch" : "/api/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload()) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "The search failed.");
+    last = data; render(data);
+    (data.alerts || []).forEach(showAlert);
+  } catch (e) {
+    banner("err", e.message || "Could not reach the railseek server. Is it still running?");
+    if (!last) $("out").replaceChildren();
+  } finally {
+    busy = false; go.disabled = false; go.textContent = "Search";
+  }
+}
+$("form").addEventListener("submit", e => { e.preventDefault(); stopWatch(); if ($("watch").checked) startWatch(); else run(false); });
+
+/* ---------- watch ---------- */
+function showAlert(text) {
+  const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  $("alerts").prepend(h("div", { class: "banner alert", role: "alert" }, time + "  " + text));
+  try { if ("Notification" in window && Notification.permission === "granted") new Notification("railseek", { body: text }); } catch (e) {}
+}
+function startWatch() {
+  try { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission(); } catch (e) {}
+  const mins = +$("every").value;
+  const cycle = async () => { await run(true); nextAt = Date.now() + mins * 60000; };
+  cycle();
+  timer = setInterval(() => {
+    const left = Math.max(0, nextAt - Date.now());
+    if (!busy && nextAt && left === 0) { nextAt = 0; cycle(); }
+    $("watch-status").textContent = busy ? "Checking now" : nextAt ? `Watching. Next check in ${Math.floor(left / 60000)}:${String(Math.floor(left % 60000 / 1000)).padStart(2, "0")}. Keep this tab open.` : "";
+  }, 1000);
+}
+function stopWatch() { if (timer) clearInterval(timer); timer = null; nextAt = 0; $("watch-status").textContent = ""; }
+$("watch").addEventListener("change", e => { if (!e.target.checked) stopWatch(); else if (last) startWatch(); });
+
+/* ---------- results ---------- */
+function optRow(o, i, clickable) {
+  const sub = [o.depart && o.arrive ? `${o.depart} → ${o.arrive}` : "", o.duration ? o.duration + " h" : ""].filter(Boolean).join("  ·  ");
+  const kids = [
+    h("span", { class: "rank" }, clickable ? String(i + 1) : ""),
+    h("span", {}, h("div", { class: "t1" }, `${o.train} ${o.train_name}`), sub ? h("div", { class: "t2" }, sub) : null),
+    h("span", { class: "c-book" }, h("div", { class: "pair" }, o.book_from, h("span", { class: "arrow" }, "→"), o.book_to),
+      h("div", { class: "t2" }, `${shortDate(o.book_date)}  ·  ${o.cls}  ·  ${o.quota}`)),
+    h("span", { class: "c-status" }, h("span", { class: "st " + o.level }, o.status), o.chance !== null ? h("div", { class: "t2" }, `${Math.round(o.chance)}% chance`) : null),
+    h("span", { class: "fare" }, o.fare !== null ? rupee(o.fare) : ""),
+    h("span", { class: "chev", "aria-hidden": "true" }, clickable ? "›" : ""),
+    clickable ? h("span", { class: "how" }, h("span", { class: "tag " + (o.kind === "exact" ? "exact" : "") }, KIND[o.kind] || o.kind), o.how) : null,
+  ];
+  return clickable ? h("button", { class: "opt", type: "button", onclick: e => openDrawer(o, e.currentTarget) }, kids) : h("div", { class: "opt" }, kids);
+}
+function render(d) {
+  const open = d.options.filter(o => o.level !== "closed"), closed = d.options.filter(o => o.level === "closed");
+  const out = [];
+  const t = d.fetched_to ? new Date(d.fetched_to).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "";
+  out.push(h("div", { class: "summary" },
+    h("h2", {}, `${d.origin} → ${d.dest}`),
+    h("span", { class: "meta" }, d.date_label),
+    h("span", { class: "meta" }, `${d.trains_found} train${d.trains_found === 1 ? "" : "s"}  ·  ${d.checked} checks` + (d.skipped ? `  ·  ${d.skipped} not made` : "") + (t ? `  ·  as of ${t}` : "") + (d.requests_used ? `  ·  ${d.requests_used} requests used` : ""))));
+  if (d.demo) out.push(h("div", { class: "banner demo" }, "Demo data: these trains, timings and statuses are invented."));
+  d.notes.forEach(n => out.push(h("div", { class: "banner warn" }, n)));
+  if (open.length) out.push(h("div", { class: "card list", style: "margin-top:12px" }, open.map((o, i) => optRow(o, i, true))));
+  else out.push(h("div", { class: "card empty", style: "margin-top:12px" }, h("h3", {}, d.trains_found ? "Nothing bookable in what was checked" : "No trains found for this route and date"),
+    h("div", {}, d.trains_found ? "Try more classes, another date, nearby stations under More options, or switch on watching to catch openings after the chart." : "Check the station codes, or try a nearby station.")));
+  if (closed.length) out.push(h("details", { class: "closed" }, h("summary", {}, `${closed.length} checked combination${closed.length === 1 ? " is" : "s are"} closed`),
+    h("div", { class: "card list" }, closed.map(o => optRow(o, 0, false)))));
+  $("out").replaceChildren(...out);
+}
+
+/* ---------- drawer ---------- */
+function sheetBlock(s, title) {
+  const keyLabels = new Set(["From", "To", "Date", "Boarding"]);
+  return [
+    h("h3", {}, title),
+    h("dl", { class: "fields" }, s.fields.map(f => h("div", { class: keyLabels.has(f.label) && f.hint ? "key" : "" }, h("dt", {}, f.label),
+      h("dd", {}, f.value, f.hint ? h("small", {}, f.hint.replace(/^<-\s*/, "").replace(/^\((.*)\)$/, "$1")) : null)))),
+    s.timing.length ? [h("h3", {}, "Timing"), h("ul", { class: "plain" }, s.timing.map(x => h("li", {}, x)))] : null,
+    h("h3", {}, "Steps"), h("ol", {}, s.steps.map(x => h("li", {}, x))),
+    h("h3", {}, "Before you pay"), h("ul", { class: "caution" }, s.cautions.map(x => h("li", {}, x))),
+  ];
+}
+function openDrawer(o, from) {
+  lastFocus = from;
+  $("d-title").textContent = `${o.train} ${o.train_name}`.trim();
+  $("d-sub").textContent = `${KIND[o.kind] || o.kind}  ·  ${o.cls}  ·  ${o.status}`;
+  const body = [];
+  o.sheets.forEach((s, i) => body.push(sheetBlock(s, o.sheets.length > 1 ? `Ticket ${i + 1}: enter on IRCTC` : "Enter these on IRCTC")));
+  const s0 = o.sheets[0];
+  body.push(h("h3", {}, "Be ready"), h("ul", { class: "plain ready" }, s0.checklist.map(x => h("li", {}, h("label", {}, h("input", { type: "checkbox" }), h("span", {}, x))))));
+  body.push(h("div", { class: "actions" }, h("a", { class: "btn", href: s0.irctc_url, target: "_blank", rel: "noopener noreferrer" }, "Open IRCTC"),
+    h("button", { class: "btn ghost", type: "button", onclick: e => copySheet(o, e.currentTarget) }, "Copy details")));
+  const tl = last && last.timelines[o.train];
+  if (tl) body.push(h("h3", {}, `Key moments, boarding at ${o.board}`), h("ul", { class: "tl" }, tl.map(e => h("li", { class: (e.passed ? "passed " : "") + (e.next ? "next" : "") },
+    h("span", { class: "when" }, e.when, h("span", { class: "rel" }, e.relative)), h("span", {}, h("span", { class: "lab" }, e.label), e.note ? h("small", {}, e.note) : null)))));
+  $("d-body").replaceChildren(...body.flat(3).filter(Boolean));
+  $("d-body").scrollTop = 0;
+  $("drawer").classList.add("on"); $("scrim").classList.add("on"); $("drawer").setAttribute("aria-hidden", "false");
+  $("d-close").focus();
+}
+function closeDrawer() {
+  $("drawer").classList.remove("on"); $("scrim").classList.remove("on"); $("drawer").setAttribute("aria-hidden", "true");
+  if (lastFocus) lastFocus.focus();
+}
+async function copySheet(o, btn) {
+  const text = o.sheets.map(s => s.fields.map(f => `${f.label}: ${f.value}`).join("\n")).join("\n\n");
+  try { await navigator.clipboard.writeText(text); btn.textContent = "Copied"; } catch (e) { btn.textContent = "Copy failed"; }
+  setTimeout(() => btn.textContent = "Copy details", 1600);
+}
+$("d-close").addEventListener("click", closeDrawer);
+$("scrim").addEventListener("click", closeDrawer);
+document.addEventListener("keydown", e => { if (e.key === "Escape" && $("drawer").classList.contains("on")) closeDrawer(); });
+
+init().catch(() => banner("err", "Could not reach the railseek server. Is it still running?"));
+</script>
+</body>
+</html>

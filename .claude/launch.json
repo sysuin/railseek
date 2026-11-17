@@ -1,0 +1,28 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "railseek",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "railseek",
+        "serve",
+        "--port",
+        "8765"
+      ],
+      "port": 8765
+    },
+    {
+      "name": "railseek-site",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "site",
+        "run",
+        "dev"
+      ],
+      "port": 8787
+    }
+  ]
+}

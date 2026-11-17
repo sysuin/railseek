@@ -1,0 +1,12 @@
+{
+  "name": "railseek-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "./build.sh",
+    "dev": "./build.sh && wrangler pages dev dist --port 8787",
+    "test": "node test/live.mjs && node test/parity.mjs",
+    "deploy": "npm test && ./build.sh && wrangler pages deploy dist --project-name railseek --branch main --commit-dirty=true"
+  },
+  "devDependencies": { "wrangler": "^4" }
+}

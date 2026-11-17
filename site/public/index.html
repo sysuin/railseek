@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>railseek: find a bookable seat on Indian trains</title>
+<meta name="description" content="When the direct search says Regret, railseek checks other station pairs on the same train and tells you exactly what to book on IRCTC. Search only: no login, no booking.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231d4ed8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5' y='3' width='14' height='14' rx='3'/%3E%3Cpath d='M5 11h14M9 21l2-4M15 21l-2-4'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 11h14M9 21l2-4M15 21l-2-4M9 14.5h.01M15 14.5h.01"/></svg>
+      railseek
+    </div>
+    <span class="tagline">Find a bookable seat when the direct search says no</span>
+    <span class="spacer"></span>
+    <span id="source" class="badge"><span class="dot"></span><span id="source-text">Loading</span></span>
+  </div>
+</header>
+
+<main class="wrap">
+  <form class="card search" id="form" autocomplete="off">
+    <div class="row">
+      <label class="f">From
+        <input class="code" type="text" id="origin" placeholder="Station code, e.g. SSM" maxlength="6" required>
+      </label>
+      <button type="button" class="swap" id="swap" title="Swap stations" aria-label="Swap From and To">⇄</button>
+      <label class="f">To
+        <input class="code" type="text" id="dest" placeholder="Station code, e.g. NDLS" maxlength="6" required>
+      </label>
+      <label class="f">Date
+        <input type="date" id="date" required>
+      </label>
+      <label class="f">Quota
+        <select id="quota">
+          <option value="GN">General</option>
+          <option value="TQ">Tatkal</option>
+          <option value="LD">Ladies</option>
+          <option value="SS">Senior citizen</option>
+        </select>
+      </label>
+      <button class="btn wide" id="go" type="submit">Find trains</button>
+    </div>
+    <div class="sub">
+      <span class="lbl">Data</span>
+      <div class="seg" role="group" aria-label="Data source">
+        <button type="button" id="mode-live" aria-pressed="false">Live</button>
+        <button type="button" id="mode-demo" aria-pressed="true">Demo</button>
+      </div>
+      <span class="hint" id="mode-hint"></span>
+    </div>
+  </form>
+
+  <div id="banners"></div>
+  <div id="trains"></div>
+  <div id="out">
+    <div class="intro">
+      <div class="card"><h3>Same train, other station pairs</h3><p>Checks booking from an earlier station or to a later one, where a different quota may still have seats, and tells you the boarding point to set.</p></div>
+      <div class="card"><h3>Pick a train and class</h3><p>Find the trains on your route, then tap a class to check that train's station pairs and rank what is bookable.</p></div>
+      <div class="card"><h3>You book, on IRCTC</h3><p>Each result opens a booking sheet with the exact values and steps. railseek never asks for your login and never books or pays.</p></div>
+    </div>
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p>Availability comes from an unofficial data source and can be out of date or wrong. Always confirm on IRCTC before paying. Timings follow reported 2025-26 rules and are a guide.</p>
+    <p>railseek is an independent personal project. It is not affiliated with IRCTC or Indian Railways, does not sell tickets, and does not ask for or store any login, passenger or payment details. Live data is limited each month; demo data shows invented trains.</p>
+  </div>
+</footer>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="d-title" aria-hidden="true">
+  <header>
+    <div><h2 id="d-title"></h2><p id="d-sub"></p></div>
+    <button class="x" id="d-close" aria-label="Close">×</button>
+  </header>
+  <div class="body" id="d-body"></div>
+</aside>
+<script src="/app.js" defer></script>
+</body>
+</html>
