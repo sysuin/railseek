@@ -60,8 +60,8 @@ export function score(avail, tier = 0) {
   if (avail.kind === "RAC") return 800 - Math.min(avail.count || 0, 100) - penalty;
   if (avail.kind === "WL") {
     const pos = avail.count || 0;
-    const chance = avail.probability !== null ? avail.probability : Math.max(0, 100 - 3 * pos);
-    return 400 + chance + ({ GNWL: 20, TQWL: -20 }[avail.wl_type] || 0) - penalty;
+    if (avail.probability !== null) return 400 + avail.probability - penalty;  // the source's estimate already reflects the waitlist type
+    return 400 + Math.max(0, 100 - 3 * pos) + ({ GNWL: 20, TQWL: -20 }[avail.wl_type] || 0) - penalty;
   }
   if (["REGRET", "NA", "DEPARTED"].includes(avail.kind)) return 0;
   return -1;
@@ -327,6 +327,7 @@ export function serialize(result, req, demo, now) {
       chance: c.avail.kind === "WL" && c.avail.probability !== null ? c.avail.probability : null,
       fare: c.avail.fare,
       as_of: c.avail.fetched_at,
+      score: o.score,
       how: how(o, req),
       sheets: [sheetData(c, result.schedules[c.train.number] || null, now)],
     };

@@ -23,6 +23,7 @@ function age(stamp) {
   if (mins < 48 * 60) return `saved ${Math.round(mins / 60)} h ago`;
   return `saved ${Math.round(mins / 1440)} days ago`;
 }
+let searchId = 0, timelines = {};
 let meta = null, journey = null, last = null, busy = false, lastFocus = null, demo = true;
 
 /* ---------- data mode ---------- */
@@ -68,12 +69,14 @@ $("form").addEventListener("submit", async e => {
   if (busy) return;
   busy = true; $("banners").replaceChildren(); save();
   const go = $("go"); go.disabled = true; go.replaceChildren(h("span", { class: "spin" }), "Finding");
+  searchId++; $("best").replaceChildren();
   journey = { origin: $("origin").value.trim().toUpperCase(), dest: $("dest").value.trim().toUpperCase(), date: $("date").value, quota: $("quota").value, demo };
   try {
     const data = await post("/api/trains", journey);
     updateQuota(data.quota);
     last = null; $("out").replaceChildren();
     renderTrains(data);
+    findBest(data);
   } catch (err) {
     banner("err", err.message); refreshMeta();
   } finally { busy = false; go.disabled = false; go.textContent = "Find trains"; }
@@ -89,7 +92,7 @@ function renderTrains(d) {
   if (!d.trains.length) box.push(h("div", { class: "card empty mt" }, h("h3", {}, "No trains found for this route and date"),
     h("div", {}, d.demo ? "Demo data only knows a few stations. Try SSM to NDLS, SSM to DLI or GAYA to CNB." : "Check the station codes, or try a nearby station.")));
   else {
-    box.push(h("div", { class: "hint hintrow" }, "Tap a class to check that train's station pairs."));
+    box.push(h("div", { class: "hint hintrow" }, "All trains on this route. Tap a class to check more station pairs for that train."));
     box.push(h("div", { class: "card list" }, d.trains.map(t => {
       const sub = [t.depart && t.arrive ? `${t.depart} → ${t.arrive}` : "", t.duration ? t.duration + " h" : "", `${t.board} → ${t.alight}`].filter(Boolean).join("  ·  ");
       return h("div", { class: "train" },
@@ -98,6 +101,53 @@ function renderTrains(d) {
     })));
   }
   $("trains").replaceChildren(...box);
+}
+
+/* ---------- best options: sweep every train in small batches, keep the top 5 ---------- */
+const TOP_N = 5, BATCH = 3, PER_TRAIN = 2;
+function pickBest(all) {
+  // best first, at most two per train so one train's classes do not fill the list
+  const seen = {}, out = [];
+  for (const o of [...all].sort((a, b) => b.score - a.score)) {
+    seen[o.train] = (seen[o.train] || 0) + 1;
+    if (seen[o.train] <= PER_TRAIN) out.push(o);
+    if (out.length === TOP_N) break;
+  }
+  return out;
+}
+function renderBest(all, done, total, failed) {
+  const top = pickBest(all), working = done < total;
+  const status = working ? `checking trains, ${done} of ${total} done` : failed ? "some trains could not be checked" : `from ${total} train${total === 1 ? "" : "s"}, all classes, general and Tatkal`;
+  const kids = [h("h2", { class: "h2" }, "Best options", h("small", { role: "status" }, working ? h("span", { class: "spin inline" }) : null, status))];
+  if (top.length) kids.push(h("div", { class: "card list" }, top.map((o, i) => optRow(o, i, true))));
+  else if (!working) kids.push(h("div", { class: "card empty" }, h("h3", {}, "Nothing bookable right now"), h("div", {}, "Every class on every train is closed for this date. Try another date, or look again after the first chart is prepared.")));
+  else kids.push(h("div", { class: "card empty" }, h("div", {}, "Looking through every train and class.")));
+  $("best").replaceChildren(...kids);
+}
+async function findBest(d) {
+  const id = ++searchId, all = [];
+  timelines = {};
+  $("best").replaceChildren();
+  const numbers = d.trains.map(t => t.number);
+  if (!numbers.length) return;
+  let done = 0, failed = false;
+  renderBest(all, 0, numbers.length, false);
+  for (let i = 0; i < numbers.length; i += BATCH) {
+    const batch = numbers.slice(i, i + BATCH);
+    try {
+      const data = await post("/api/top", { ...journey, trains: batch });
+      if (id !== searchId) return;            // a newer search has started
+      updateQuota(data.quota);
+      Object.assign(timelines, data.timelines);
+      all.push(...data.options);
+    } catch (err) {
+      if (id !== searchId) return;
+      failed = true;
+      if (!all.length && i === 0) { $("best").replaceChildren(); banner("err", err.message); refreshMeta(); return; }
+    }
+    done += batch.length;
+    renderBest(all, done, numbers.length, failed);
+  }
 }
 
 /* ---------- step 2: check one train and class ---------- */
@@ -122,9 +172,9 @@ async function check(t, cls, btn) {
 function optRow(o, i, clickable) {
   const kids = [
     h("span", { class: "rank" }, clickable ? String(i + 1) : ""),
-    h("span", {}, h("div", { class: "t1" }, KIND[o.kind] || o.kind), h("div", { class: "t2" }, `${o.train} ${o.train_name}`)),
+    h("span", {}, h("div", { class: "t1" }, `${o.train} ${o.train_name}`), h("div", { class: "t2" }, [KIND[o.kind] || o.kind, o.depart && o.arrive ? `${o.depart} → ${o.arrive}` : ""].filter(Boolean).join("  ·  "))),
     h("span", { class: "c-book" }, h("div", { class: "pair" }, o.book_from, h("span", { class: "arrow" }, "→"), o.book_to),
-      h("div", { class: "t2" }, `${shortDate(o.book_date)}  ·  ${o.cls}  ·  ${o.quota}`)),
+      h("div", { class: "t2" }, `${shortDate(o.book_date)}  ·  ${o.cls}  ·  ${o.quota === "TQ" ? "Tatkal" : "General"}`)),
     h("span", { class: "c-status" }, h("span", { class: "st " + o.level }, o.status),
       h("div", { class: "t2" }, [o.chance !== null ? `${Math.round(o.chance)}% chance` : "", age(o.as_of)].filter(Boolean).join("  ·  "))),
     h("span", { class: "fare" }, o.fare !== null ? rupee(o.fare) : ""),
@@ -165,7 +215,7 @@ function openDrawer(o, from) {
   body.push(h("h3", {}, "Be ready"), h("ul", { class: "plain ready" }, s.checklist.map(x => h("li", {}, h("label", {}, h("input", { type: "checkbox" }), h("span", {}, x))))));
   body.push(h("div", { class: "actions" }, h("a", { class: "btn", href: "https://www.irctc.co.in/nget/train-search", target: "_blank", rel: "noopener noreferrer" }, "Open IRCTC"),
     h("button", { class: "btn ghost", type: "button", onclick: e => copySheet(o, e.currentTarget) }, "Copy details")));
-  const tl = last && last.timelines[o.train];
+  const tl = (last && last.timelines[o.train]) || timelines[o.train];
   if (tl) body.push(h("h3", {}, `Key moments, boarding at ${o.board}`), h("ul", { class: "tl" }, tl.map(e => h("li", { class: (e.passed ? "passed " : "") + (e.next ? "next" : "") },
     h("span", { class: "when" }, e.when, h("span", { class: "rel" }, e.relative)), h("span", {}, h("span", { class: "lab" }, e.label), e.note ? h("small", {}, e.note) : null)))));
   $("d-body").replaceChildren(...body.flat(3).filter(Boolean));

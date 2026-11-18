@@ -33,8 +33,9 @@ let out = serialize(await search(p, req), req, false, now);
 await quota.save();
 assert.equal(calls, 5, "trains + schedule + exact + 2 earlier origins");
 assert.deepEqual(out.options.map(o => [o.book_from, o.book_date, o.status, o.level]), [
-  ["GAYA", "2026-11-18", "GNWL12/WL4", "waitlist"], ["SSM", "2026-11-18", "RLWL67/WL23", "waitlist"], ["PURI", "2026-11-17", "NOT AVAILABLE", "closed"]]);
-assert.equal(out.options[1].chance, 28); assert.equal(out.options[1].fare, 1280);
+  // the fake source gives both the same 28% chance, so the simpler direct booking ranks first
+  ["SSM", "2026-11-18", "RLWL67/WL23", "waitlist"], ["GAYA", "2026-11-18", "GNWL12/WL4", "waitlist"], ["PURI", "2026-11-17", "NOT AVAILABLE", "closed"]]);
+assert.equal(out.options[0].chance, 28); assert.equal(out.options[0].fare, 1280);
 assert.equal(quota.remaining, 5);
 
 ({ quota, p } = await mk(10));           // same search again: all cached, nothing spent
@@ -97,4 +98,14 @@ assert.equal(out.options[0].status, "AVAILABLE-0072#"); assert.equal(out.options
 assert.deepEqual(ctCalls, [], "second visitor is served from the shared cache");
 assert.equal((await new Quota(ckv, 100, now, "day", "ct:").load()).used, 5);
 assert.equal((await new Quota(ckv, 100, now).load()).used, 0, "RapidAPI and ConfirmTkt counters are separate");
+
+/* top-5 batch: all classes, both quotas, direct plus the train's first station */
+c = await mkct(); ctCalls = [];
+const topReq = { ...req, classes: [], quotas: ["GN", "TQ"], trains: ["12801"], upstream: 1, downstream: 0 };
+const topRes = await search(c.p, topReq);
+assert.deepEqual(ctCalls, [], "nothing new is fetched: train list, route and origin pair are already cached");
+out = serialize({ ...topRes, options: topRes.options.filter(o => o.score > 0).slice(0, 8) }, topReq, false, now);
+assert.deepEqual(out.options.map(o => [o.cls, o.quota, o.book_from, o.status]), [
+  ["SL", "TQ", "SSM", "AVAILABLE-0072#"], ["3A", "GN", "PURI", "GNWL40/WL12"], ["SL", "GN", "SSM", "RLWL85/WL41"]]);
+assert.ok(out.options[0].score > out.options[1].score && out.options[1].score > out.options[2].score);
 console.log("live provider OK");

@@ -174,3 +174,5 @@ footer.site p { margin: 4px 0; max-width: 78ch; }
 
 .mt { margin-top: 14px; }
 .hintrow { margin: 0 2px 8px; }
+.spin.inline { display: inline-block; width: 11px; height: 11px; margin-right: 7px; vertical-align: -1px; }
+#best .h2 { margin-top: 22px; }

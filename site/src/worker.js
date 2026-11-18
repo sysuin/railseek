@@ -5,6 +5,7 @@ import { ALL_CLASSES, ProviderError, addDays, istToday, search, serialize } from
 import { ConfirmTktProvider, DemoProvider, LiveProvider, Quota } from "./providers.js";
 
 const CODE = /^[A-Z]{1,6}$/, TRAIN = /^[0-9A-Z]{3,6}$/, QUOTAS = ["GN", "TQ"];
+const TOP_BATCH = 3;
 class BadRequest extends Error {}
 
 const json = (status, body) => new Response(JSON.stringify(body), {
@@ -25,7 +26,7 @@ function journey(body, now) {
 
 async function visitorAllowed(request, env, now) {
   // counts live searches per visitor per day; the address is hashed and expires in a day
-  const limit = num(env, "VISITOR_DAILY_LIVE", 20);
+  const limit = num(env, "VISITOR_DAILY_LIVE", 300);
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
   const day = istToday(now);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${day}|${ip}|railseek`));
@@ -60,7 +61,7 @@ async function api(request, env, ctx, path) {
     const today = istToday(now);
     return json(200, { today, max_date: addDays(today, 62), classes: ALL_CLASSES, ...quotaInfo(env, quota) });
   }
-  if (request.method !== "POST" || !["/api/trains", "/api/check"].includes(path)) return json(404, { error: "Not found" });
+  if (request.method !== "POST" || !["/api/trains", "/api/check", "/api/top"].includes(path)) return json(404, { error: "Not found" });
   if (!(request.headers.get("Content-Type") || "").includes("application/json")) return json(415, { error: "JSON only" });
   const origin = request.headers.get("Origin");
   if (origin && origin !== new URL(request.url).origin) return json(403, { error: "Cross-site requests are not allowed" });
@@ -74,6 +75,17 @@ async function api(request, env, ctx, path) {
     if (path === "/api/trains") {
       const trains = await provider.trainsBetween(j.origin, j.dest, j.on);
       return json(200, { ...j, date: j.on, demo, trains, quota: quotaInfo(env, quota) });
+    }
+    if (path === "/api/top") {
+      // Best options for a few trains at a time: every class, general and Tatkal, direct and
+      // booked from the train's first station. Small batches keep each call within platform limits.
+      const trains = (Array.isArray(body.trains) ? body.trains : []).map(t => String(t).trim().toUpperCase());
+      if (!trains.length || trains.length > TOP_BATCH || !trains.every(t => TRAIN.test(t))) throw new BadRequest("Bad train list.");
+      const req = { ...j, also_from: [], also_to: [], classes: [], quotas: ["GN", "TQ"], trains, upstream: 1, downstream: 0 };
+      const result = await search(provider, req);
+      const open = result.options.filter(o => o.score > 0);
+      result.options = open.slice(0, 8);
+      return json(200, { ...serialize(result, req, demo, now), open_count: open.length, quota: quotaInfo(env, quota) });
     }
     const train = String(body.train || "").trim().toUpperCase(), cls = String(body.cls || "").trim().toUpperCase();
     const q = String(body.quota || "GN").toUpperCase();

@@ -32,7 +32,12 @@ cd site && npm run deploy
   `DAILY_CAP` (upstream requests a day for the whole site), `SEARCH_CAP` (per check) and
   `VISITOR_DAILY_LIVE` (live searches per visitor per day). Setting `DATA_SOURCE` to `irctc1`
   switches back to the RapidAPI key stored as the `RAPIDAPI_KEY` secret, capped by `MONTHLY_CAP`.
-- Visitors pick a train and class; one check spends at most 6 upstream requests. Answers are shared
+- Every search automatically shows the five best options. The page sweeps all trains on the route
+  three at a time (`/api/top`): every class, general and Tatkal, booked directly and from each
+  train's first station, at most two results per train. Batches keep each call inside the free
+  plan's limit of 50 subrequests.
+- Visitors can then tap a class on any train to check more station pairs; one such check spends at
+  most 6 upstream requests. Answers are shared
   between visitors for 10 minutes, and each result shows how long ago its figure was saved.
 - No watching or alerts on the public site, and nothing is stored about visitors beyond a hashed,
   one-day rate-limit counter.

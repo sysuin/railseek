@@ -49,9 +49,10 @@ def score(avail: Avail | None, tier: int = 0) -> float:
         return 800 - min(avail.count or 0, 100) - penalty
     if avail.kind == "WL":
         pos = avail.count or 0
-        chance = avail.probability if avail.probability is not None else max(0.0, 100 - 3 * pos)
+        if avail.probability is not None:
+            return 400 + avail.probability - penalty  # the source's estimate already reflects the waitlist type
         bonus = {"GNWL": 20, "TQWL": -20}.get(avail.wl_type, 0)
-        return 400 + chance + bonus - penalty
+        return 400 + max(0.0, 100 - 3 * pos) + bonus - penalty
     if avail.kind in ("REGRET", "NA", "DEPARTED"):
         return 0.0
     return -1.0

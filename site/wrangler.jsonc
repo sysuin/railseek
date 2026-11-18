@@ -12,7 +12,7 @@
     "MONTHLY_CAP": "10",
     // most upstream requests one check may spend
     "SEARCH_CAP": "8",
-    // live searches one visitor may start per day
-    "VISITOR_DAILY_LIVE": "30"
+    // live API calls one visitor may make per day (one search with its top-5 sweep is about 5)
+    "VISITOR_DAILY_LIVE": "300"
   }
 }
