@@ -5,11 +5,14 @@
   "compatibility_date": "2026-11-01",
   "kv_namespaces": [{ "binding": "KV", "id": "0c04b441a9694db28528453f52d42c5a" }],
   "vars": {
-    // live requests the shared RapidAPI key may spend per calendar month (free plan: 10)
+    // "confirmtkt" (no key) or "irctc1" (RapidAPI key stored as the RAPIDAPI_KEY secret)
+    "DATA_SOURCE": "confirmtkt",
+    // upstream requests the whole site may make per day (confirmtkt) or per month (irctc1)
+    "DAILY_CAP": "1500",
     "MONTHLY_CAP": "10",
-    // most live requests one check may spend
+    // most upstream requests one check may spend
     "SEARCH_CAP": "8",
     // live searches one visitor may start per day
-    "VISITOR_DAILY_LIVE": "20"
+    "VISITOR_DAILY_LIVE": "30"
   }
 }

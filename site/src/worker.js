@@ -2,9 +2,9 @@
 // Read-only: it searches and explains; it never logs in to IRCTC or books.
 
 import { ALL_CLASSES, ProviderError, addDays, istToday, search, serialize } from "./core.js";
-import { DemoProvider, LiveProvider, Quota } from "./providers.js";
+import { ConfirmTktProvider, DemoProvider, LiveProvider, Quota } from "./providers.js";
 
-const CODE = /^[A-Z]{1,6}$/, TRAIN = /^[0-9A-Z]{3,6}$/, QUOTAS = ["GN", "TQ", "LD", "SS"];
+const CODE = /^[A-Z]{1,6}$/, TRAIN = /^[0-9A-Z]{3,6}$/, QUOTAS = ["GN", "TQ"];
 class BadRequest extends Error {}
 
 const json = (status, body) => new Response(JSON.stringify(body), {
@@ -36,20 +36,27 @@ async function visitorAllowed(request, env, now) {
   return true;
 }
 
+// DATA_SOURCE "confirmtkt" (default, no key) or "irctc1" (RapidAPI key with a monthly allowance)
+const source = env => (env.DATA_SOURCE === "irctc1" && env.RAPIDAPI_KEY ? "irctc1" : "confirmtkt");
+const loadQuota = (env, now) => (source(env) === "irctc1"
+  ? new Quota(env.KV, num(env, "MONTHLY_CAP", 10), now)
+  : new Quota(env.KV, num(env, "DAILY_CAP", 1500), now, "day", "ct:")).load();
+
 async function providerFor(request, env, body, now) {
-  const quota = await new Quota(env.KV, num(env, "MONTHLY_CAP", 10), now).load();
-  const wantLive = !body.demo && !!env.RAPIDAPI_KEY;
-  if (!wantLive) return { provider: new DemoProvider(now), quota, demo: true };
+  const quota = await loadQuota(env, now);
+  if (body.demo) return { provider: new DemoProvider(now), quota, demo: true };
   if (!(await visitorAllowed(request, env, now))) throw new BadRequest("You have reached today's limit for live searches. Demo data still works.");
-  return { provider: new LiveProvider({ key: env.RAPIDAPI_KEY, kv: env.KV, quota, perSearch: num(env, "SEARCH_CAP", 8), now, base: env.UPSTREAM_BASE }), quota, demo: false };
+  const opts = { kv: env.KV, quota, perSearch: num(env, "SEARCH_CAP", 8), now, base: env.UPSTREAM_BASE };
+  const provider = source(env) === "irctc1" ? new LiveProvider({ ...opts, key: env.RAPIDAPI_KEY }) : new ConfirmTktProvider(opts);
+  return { provider, quota, demo: false };
 }
 
-const quotaInfo = (env, quota) => ({ live_available: !!env.RAPIDAPI_KEY && quota.remaining > 0, remaining: env.RAPIDAPI_KEY ? quota.remaining : 0, monthly_cap: quota.cap });
+const quotaInfo = (env, quota) => ({ source: source(env), live_available: quota.remaining > 0, remaining: quota.remaining, cap: quota.cap, period: quota.period });
 
 async function api(request, env, ctx, path) {
   const now = Date.now();
   if (path === "/api/meta" && request.method === "GET") {
-    const quota = await new Quota(env.KV, num(env, "MONTHLY_CAP", 10), now).load();
+    const quota = await loadQuota(env, now);
     const today = istToday(now);
     return json(200, { today, max_date: addDays(today, 62), classes: ALL_CLASSES, ...quotaInfo(env, quota) });
   }

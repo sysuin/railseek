@@ -169,12 +169,11 @@ class App:
 
     @property
     def has_key(self) -> bool:
-        return bool(self.env.get("RAPIDAPI_KEY", "").strip())
+        return True  # the default data source needs no key
 
     def provider(self, body: dict):
-        demo = bool(body.get("demo")) or not self.has_key
         budget = _int(body, "max_requests", 60, 1, 500)
-        return make_provider("demo" if demo else "irctc1", self.env, self.cache, budget)
+        return make_provider("demo" if body.get("demo") else "auto", self.env, self.cache, budget)
 
     def meta(self) -> dict:
         today = datetime.now(IST).date()
@@ -262,8 +261,6 @@ def serve(root: Path, env: dict, port: int = 8765, open_browser: bool = False) -
     httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(app))
     url = f"http://localhost:{port}"
     print(f"railseek is running at {url}  (Ctrl-C to stop)", flush=True)
-    if not app.has_key:
-        print("No RAPIDAPI_KEY found, so the page will use demo data.", flush=True)
     if open_browser:
         import webbrowser
 

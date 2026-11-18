@@ -326,6 +326,7 @@ export function serialize(result, req, demo, now) {
       status: c.avail.raw || c.avail.kind,
       chance: c.avail.kind === "WL" && c.avail.probability !== null ? c.avail.probability : null,
       fare: c.avail.fare,
+      as_of: c.avail.fetched_at,
       how: how(o, req),
       sheets: [sheetData(c, result.schedules[c.train.number] || null, now)],
     };

@@ -83,7 +83,7 @@ def render(result: SearchResult, req: SearchRequest, limit: int, show_closed: bo
     )
     open_opts = [o for o in result.options if o.score > 0]
     closed = [o for o in result.options if o.score <= 0]
-    rows = [("#", "Train", "Cls/Q", "Book", "Status", "Chance", "Fare", "How")]
+    rows = [("#", "Train", "Cls/Q", "Book", "Status", "Chance", "Fare", "As of", "How")]
     for i, o in enumerate(open_opts[:limit], 1):
         c = o.legs[0]
         probs = [leg.avail.probability for leg in o.legs if leg.avail.kind == "WL" and leg.avail.probability is not None]
@@ -97,6 +97,7 @@ def render(result: SearchResult, req: SearchRequest, limit: int, show_closed: bo
                 status_text(o),
                 f"{min(probs):.0f}%" if probs else "",
                 f"{sum(fares):.0f}" if all(f is not None for f in fares) else "",
+                min((leg.avail.fetched_at[5:16].replace("T", " ") for leg in o.legs if leg.avail.fetched_at), default=""),
                 how(o, req),
             )
         )
@@ -117,7 +118,7 @@ def render(result: SearchResult, req: SearchRequest, limit: int, show_closed: bo
                 lines.append(f"  {c.train.number} {c.cls}/{c.quota} {c.book_from}-{c.book_to} {c.book_date:%d%b}: {status_text(o)}")
     stamps = sorted(leg.avail.fetched_at for o in result.options for leg in o.legs if leg.avail.fetched_at)
     if stamps:
-        lines.append(f"\nData fetched between {stamps[0]} and {stamps[-1]} from an unofficial source.")
+        lines.append(f"\nFigures date from {stamps[0][:16]} to {stamps[-1][:16]} (see As of), from an unofficial source.")
     lines.append("Check the option on IRCTC before paying; IRCTC is the final authority.")
     if any(o.kind in ("earlier-origin", "both-extended") for o in open_opts[:limit]):
         lines.append(
@@ -168,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def common(sp):
-        sp.add_argument("--provider", default="auto", choices=["auto", "irctc1", "demo"])
+        sp.add_argument("--provider", default="auto", choices=["auto", "confirmtkt", "irctc1", "demo"])
         sp.add_argument("--max-requests", type=int, default=100, help="cap on live API requests (default 100)")
         sp.add_argument("--no-cache", action="store_true")
 

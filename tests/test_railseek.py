@@ -281,5 +281,71 @@ class HandoffTests(unittest.TestCase):
         self.assertNotIn("Refund:", s)
 
 
+class ConfirmTktTests(unittest.TestCase):
+    """Shapes copied from real responses on 18 Nov 2026, trimmed."""
+
+    SEARCH = {"data": {"trainList": [
+        {"trainNumber": "12397", "trainName": "MAHABODHI EXP", "fromStnCode": "SSM", "toStnCode": "NDLS", "departureTime": "15:28",
+         "arrivalTime": "04:10", "duration": 762, "avlClasses": ["SL", "3A"],
+         "availabilityCache": {
+             "3A": {"availability": "GNWL181/WL80", "predictionPercentage": 12, "fare": "1390", "date": "2026-11-19T00:00:00", "cacheTime": "2026-11-18T10:14:02.001"},
+             "SL": {"availability": "REGRET", "predictionPercentage": 0, "fare": "540", "date": "2026-11-19T00:00:00", "cacheTime": "2026-11-18T09:46:00.001"}},
+         "availabilityCacheTatkal": {
+             "SL": {"availability": "AVAILABLE-0072#", "fare": "640", "date": "2026-11-19T00:00:00", "cacheTime": "2026-11-18T11:00:10.001"},
+             "3A": {"availability": "NOT AVAILABLE", "fare": "0", "date": "2026-11-19T00:00:00", "cacheTime": "2026-11-18T10:28:34.001"}}},
+        {"trainNumber": "12801", "trainName": "PURUSHOTTAM SF", "fromStnCode": "SSM", "toStnCode": "ANVT", "departureTime": "14:58",
+         "arrivalTime": "03:50", "duration": 772, "avlClasses": ["3A"],
+         "availabilityCache": {"3A": {"availability": "RLWL7/WL3", "predictionPercentage": 53, "fare": "1280", "date": "2026-11-20T00:00:00", "cacheTime": "2026-11-18T02:43:00.001"}}},
+    ]}}
+
+    def provider(self):
+        from railseek.providers.confirmtkt import ConfirmTktProvider
+
+        calls = []
+
+        class Fake(ConfirmTktProvider):
+            def _get(inner, url, params, headers, ttl):
+                calls.append(params)
+                return self.SEARCH, "2026-11-18T11:05:00+05:30", False
+
+        from railseek.cache import Cache
+        from pathlib import Path
+
+        return Fake(Cache(Path("/nonexistent"), enabled=False), 10), calls
+
+    def test_one_request_serves_trains_and_all_classes(self):
+        p, calls = self.provider()
+        hits = p.trains_between("SSM", "NDLS", D)
+        self.assertEqual([(h.number, h.board, h.alight, h.duration) for h in hits], [("12397", "SSM", "NDLS", "12:42"), ("12801", "SSM", "ANVT", "12:52")])
+        self.assertEqual(calls[0]["dateOfJourney"], "19-11-2026")
+        a = p.availability("12397", "SSM", "NDLS", D, "3A", "GN")
+        self.assertEqual((a.kind, a.wl_type, a.count, a.probability, a.fare, a.fetched_at), ("WL", "GNWL", 80, 12.0, 1390.0, "2026-11-18T10:14:02+05:30"))
+        self.assertEqual(p.availability("12397", "SSM", "NDLS", D, "SL", "GN").kind, "REGRET")
+        t = p.availability("12397", "SSM", "NDLS", D, "SL", "TQ")
+        self.assertEqual((t.kind, t.count, t.fare), ("AVAILABLE", 72, 640.0))
+        self.assertIsNone(p.availability("12397", "SSM", "NDLS", D, "3A", "TQ").fare)
+        self.assertEqual(len(calls), 1)  # everything above came from the one response
+
+    def test_gaps_are_reported_not_guessed(self):
+        p, calls = self.provider()
+        p.trains_between("SSM", "NDLS", D)
+        self.assertEqual(p.availability("12801", "SSM", "ANVT", D, "3A", "GN").kind, "UNKNOWN")  # response is for another date
+        self.assertEqual(p.availability("12397", "SSM", "NDLS", D, "2A", "GN").kind, "NA")  # class absent
+        self.assertEqual(p.availability("12397", "SSM", "NDLS", D, "3A", "LD").kind, "UNKNOWN")  # quota not covered
+        self.assertEqual(p.availability("99999", "SSM", "NDLS", D, "3A", "GN").kind, "NA")  # train not on this pair
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(p.availability("12397", "GAYA", "NDLS", D, "3A", "GN").kind, "NA")  # new pair: one more request
+        self.assertEqual(len(calls), 2)
+
+    def test_schedule(self):
+        from railseek.providers.confirmtkt import parse_schedule
+
+        s = parse_schedule({"Schedule": [
+            {"StationCode": "PURI", "StationName": "PURI", "ArrivalTime": "", "DepartureTime": "21:55", "Day": 1, "Distance": 0.0},
+            {"StationCode": "SSM", "StationName": "SASARAM", "ArrivalTime": "14:56", "DepartureTime": "14:58", "Day": 2, "Distance": 971.0},
+            {"StationCode": "ANVT", "StationName": "ANAND VIHAR TRM", "ArrivalTime": "03:50", "DepartureTime": "", "Day": 3, "Distance": 1846.0}]}, "12801")
+        self.assertEqual([(x.code, x.day, x.dep_min) for x in s], [("PURI", 1, 1315), ("SSM", 2, 898), ("ANVT", 3, 230)])
+
+
 if __name__ == "__main__":
     unittest.main()

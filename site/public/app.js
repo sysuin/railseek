@@ -14,6 +14,15 @@ function h(tag, attrs, ...kids) {
 const KIND = { "exact": "Direct", "earlier-origin": "Earlier origin", "later-destination": "Later destination", "both-extended": "Extended both ends", "alt-station": "Nearby station" };
 const rupee = n => "₹" + new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n);
 const shortDate = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+function age(stamp) {
+  // "saved 3 h ago" for live figures; nothing for demo data
+  if (!stamp || demo) return "";
+  const mins = Math.round((Date.now() - new Date(stamp).getTime()) / 60000);
+  if (!(mins >= 0)) return "";
+  if (mins < 60) return `saved ${mins} min ago`;
+  if (mins < 48 * 60) return `saved ${Math.round(mins / 60)} h ago`;
+  return `saved ${Math.round(mins / 1440)} days ago`;
+}
 let meta = null, journey = null, last = null, busy = false, lastFocus = null, demo = true;
 
 /* ---------- data mode ---------- */
@@ -25,8 +34,8 @@ function setMode(wantDemo) {
   $("source").className = "badge " + (demo ? "demo" : "live");
   $("source-text").textContent = demo ? "Demo data" : "Live data";
   $("mode-hint").textContent = meta.live_available
-    ? (demo ? "Demo shows invented trains. Try SSM to NDLS." : `Live data is shared and limited: ${meta.remaining} of ${meta.monthly_cap} requests left this month. One check uses up to 8.`)
-    : "This month's live data allowance is used up, so only demo data is available. Try SSM to NDLS.";
+    ? (demo ? "Demo shows invented trains. Try SSM to NDLS." : "Live figures are saved copies, not instant lookups. Each result shows when it was saved.")
+    : `Live data has reached its limit for ${meta.period === "day" ? "today" : "this month"}, so only demo data is available. Try SSM to NDLS.`;
 }
 function updateQuota(q) { if (q) { Object.assign(meta, q); setMode(demo); } }
 
@@ -116,7 +125,8 @@ function optRow(o, i, clickable) {
     h("span", {}, h("div", { class: "t1" }, KIND[o.kind] || o.kind), h("div", { class: "t2" }, `${o.train} ${o.train_name}`)),
     h("span", { class: "c-book" }, h("div", { class: "pair" }, o.book_from, h("span", { class: "arrow" }, "→"), o.book_to),
       h("div", { class: "t2" }, `${shortDate(o.book_date)}  ·  ${o.cls}  ·  ${o.quota}`)),
-    h("span", { class: "c-status" }, h("span", { class: "st " + o.level }, o.status), o.chance !== null ? h("div", { class: "t2" }, `${Math.round(o.chance)}% chance`) : null),
+    h("span", { class: "c-status" }, h("span", { class: "st " + o.level }, o.status),
+      h("div", { class: "t2" }, [o.chance !== null ? `${Math.round(o.chance)}% chance` : "", age(o.as_of)].filter(Boolean).join("  ·  "))),
     h("span", { class: "fare" }, o.fare !== null ? rupee(o.fare) : ""),
     h("span", { class: "chev", "aria-hidden": "true" }, clickable ? "›" : ""),
     clickable ? h("span", { class: "how" }, o.how) : null,

@@ -62,7 +62,7 @@ class HttpProvider:
         self._last = time.time()
         req = urllib.request.Request(
             url + "?" + urllib.parse.urlencode(params),
-            headers={"Accept": "application/json", "User-Agent": "railseek/0.1", **headers},
+            headers={"Accept": "application/json", "User-Agent": "railseek/0.2", **headers},
         )
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
@@ -88,12 +88,13 @@ def make_provider(name: str, env: dict, cache: Cache, max_requests: int):
 
     if name == "demo":
         return DemoProvider()
+    if name in ("auto", "confirmtkt"):
+        from .confirmtkt import ConfirmTktProvider
+
+        return ConfirmTktProvider(cache, max_requests)
     key = env.get("RAPIDAPI_KEY", "").strip()
-    if name in ("auto", "irctc1"):
+    if name == "irctc1":
         if not key:
-            raise ProviderError(
-                "No RAPIDAPI_KEY found. Put it in a .env file (see .env.example), "
-                "or run with --provider demo to try the tool on made-up data."
-            )
+            raise ProviderError("--provider irctc1 needs RAPIDAPI_KEY in a .env file (see .env.example).")
         return Irctc1Provider(key, cache, max_requests, railradar_key=env.get("RAILRADAR_KEY", "").strip())
     raise ProviderError(f"unknown provider {name!r}")

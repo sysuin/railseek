@@ -68,21 +68,25 @@ const toIso = v => {
 };
 
 export class Quota {
-  // The shared key's monthly allowance. KV counters are not atomic, which is fine:
-  // the upstream plan is itself a hard limit, this only avoids hammering it.
-  constructor(kv, cap, now) { this.kv = kv; this.cap = cap; this.month = new Date(now).toISOString().slice(0, 7); this.used = 0; this.blocked = false; this.spent = 0; }
+  // Allowance of upstream requests per period ("month" for the RapidAPI key, "day" for
+  // ConfirmTkt). KV counters are not atomic, which is fine: this is a politeness cap.
+  constructor(kv, cap, now, period = "month", tag = "") {
+    this.kv = kv; this.cap = cap; this.used = 0; this.blocked = false; this.spent = 0;
+    this.month = tag + new Date(now).toISOString().slice(0, period === "day" ? 10 : 7);
+    this.blockKey = `q:blocked${tag}`; this.period = period;
+  }
   async load() {
-    const [used, blocked] = await Promise.all([this.kv.get(`q:${this.month}`), this.kv.get("q:blocked")]);
+    const [used, blocked] = await Promise.all([this.kv.get(`q:${this.month}`), this.kv.get(this.blockKey)]);
     this.used = +(used || 0); this.blocked = !!blocked;
     return this;
   }
   get remaining() { return this.blocked ? 0 : Math.max(0, this.cap - this.used); }
   take() {
-    if (this.remaining <= 0) throw new BudgetExceeded("this month's live data allowance is used up");
+    if (this.remaining <= 0) throw new BudgetExceeded(this.period === "day" ? "today's live data allowance is used up" : "this month's live data allowance is used up");
     this.used++; this.spent++;
   }
   refund() { this.used = Math.max(0, this.used - 1); this.spent--; }
-  async block(seconds) { this.blocked = true; await this.kv.put("q:blocked", "1", { expirationTtl: Math.max(60, Math.min(seconds || 3600, 31 * 86400)) }); }
+  async block(seconds) { this.blocked = true; await this.kv.put(this.blockKey, "1", { expirationTtl: Math.max(60, Math.min(seconds || 3600, 31 * 86400)) }); }
   async save() { if (this.spent > 0) await this.kv.put(`q:${this.month}`, String(this.used), { expirationTtl: 40 * 86400 }); }
 }
 
@@ -178,5 +182,112 @@ export class LiveProvider {
       a.fetched_at = isoStamp(this.now);
       return a;
     });
+  }
+}
+
+/* ---------- ConfirmTkt public search: no key; one request per station pair covers every train and class ---------- */
+const CT = "https://cttrainsapi.confirmtkt.com/api/v1/trains";
+const CT_FIELD = { GN: "gn", TQ: "tq" };
+const na = raw => ({ ...parseStatus(""), raw, kind: "NA" });
+const ddmmyyyy = iso => `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;
+const titleCase = s => String(s || "").toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase());
+
+function trimEntries(map) {
+  const out = {};
+  for (const [cls, e] of Object.entries(map || {})) {
+    if (!e || typeof e !== "object") continue;
+    out[cls] = { a: String(e.availability || ""), p: typeof e.predictionPercentage === "number" ? e.predictionPercentage : null, f: +e.fare || 0, d: String(e.date || "").slice(0, 10), t: String(e.cacheTime || "").slice(0, 19) };
+  }
+  return out;
+}
+
+export function ctEntry(e, on) {
+  // ConfirmTkt's saved copy for one class; fetched_at is when ConfirmTkt saved it (IST)
+  let a;
+  if (e.d !== on) a = { ...parseStatus(""), raw: "requested date not in response" };
+  else {
+    a = parseStatus(e.a);
+    if (a.kind === "WL" && e.p !== null && e.p > 0) a.probability = e.p;
+    a.fare = e.f > 0 ? e.f : null;
+  }
+  a.fetched_at = e.t.length === 19 ? e.t + "+05:30" : "";
+  return a;
+}
+
+export class ConfirmTktProvider {
+  name = "confirmtkt";
+  constructor({ kv, quota, perSearch, fetcher, base }) {
+    this.kv = kv; this.quota = quota; this.perSearch = perSearch; this.calls = 0; this.base = base || CT;
+    this.fetcher = fetcher || ((url, init) => fetch(url, init));
+    this.pairs = new Map();
+  }
+  async get(path, params) {
+    if (this.calls >= this.perSearch) throw new BudgetExceeded(`this search reached its limit of ${this.perSearch} live requests`);
+    this.quota.take(); this.calls++;
+    let res;
+    try { res = await this.fetcher(`${this.base}${path}?${new URLSearchParams(params)}`, { headers: { Accept: "application/json", "User-Agent": "railseek/0.2" }, signal: AbortSignal.timeout(20000) }); }
+    catch (e) {
+      console.error("confirmtkt fetch failed:", e && e.name, e && e.message);
+      this.quota.refund(); this.calls--;
+      throw new ProviderError("the data source did not answer");
+    }
+    if ([401, 403, 429].includes(res.status)) {
+      console.error("confirmtkt refused:", res.status);
+      await this.quota.block(res.status === 429 ? 900 : 3600);   // back off instead of retrying into a block
+      throw new AccessDenied("the data source is refusing requests for now");
+    }
+    if (!res.ok) throw new ProviderError(`the data source returned an error (${res.status})`);
+    try { return await res.json(); } catch (e) { throw new ProviderError("the data source sent an unreadable answer"); }
+  }
+  async pair(frm, to, on) {
+    const id = `${frm}:${to}:${on}`;
+    if (this.pairs.has(id)) return this.pairs.get(id);
+    let rows = await this.kv.get(`c:p:${id}`, "json");
+    if (!rows) {
+      const data = await this.get("/search", { sourceStationCode: frm, destinationStationCode: to, addAvailabilityCache: "true", dateOfJourney: ddmmyyyy(on), enableNearby: "true", showPredictionGlobal: "true" });
+      const list = (data && data.data && data.data.trainList) || [];
+      rows = list.filter(r => r && r.trainNumber).map(r => ({
+        number: String(r.trainNumber), name: titleCase(r.trainName), board: String(r.fromStnCode || frm).toUpperCase(), alight: String(r.toStnCode || to).toUpperCase(),
+        classes: (r.avlClasses || []).map(c => String(c).toUpperCase()), depart: String(r.departureTime || ""), arrive: String(r.arrivalTime || ""),
+        duration: Number.isInteger(r.duration) ? `${Math.floor(r.duration / 60)}:${String(r.duration % 60).padStart(2, "0")}` : "",
+        gn: trimEntries(r.availabilityCache), tq: trimEntries(r.availabilityCacheTatkal),
+      })).filter(r => /^[0-9A-Z]{3,6}$/.test(r.number));
+      await this.kv.put(`c:p:${id}`, JSON.stringify(rows), { expirationTtl: TTL.avail });
+    }
+    this.pairs.set(id, rows);
+    return rows;
+  }
+  async trainsBetween(frm, to, on) {
+    return (await this.pair(frm, to, on)).map(({ gn, tq, ...hit }) => hit);
+  }
+  async schedule(trainNo) {
+    const key = `c:cs:${trainNo}`;
+    const hit = await this.kv.get(key, "json");
+    if (hit) return hit;
+    const data = await this.get("/schedule", { trainNo });
+    const rows = data && data.Schedule;
+    if (!Array.isArray(rows)) throw new ProviderError(`no route in schedule response for ${trainNo}`);
+    const stops = [];
+    for (const r of rows) {
+      const code = String(r.StationCode || "").toUpperCase();
+      if (!code) continue;
+      let dep = hhmm(r.DepartureTime); if (dep === null) dep = hhmm(r.ArrivalTime);
+      stops.push({ code, name: titleCase(r.StationName || code), seq: stops.length, day: parseInt(r.Day, 10) || 1, dep_min: dep });
+    }
+    if (stops.length < 2) throw new ProviderError(`schedule for ${trainNo} has fewer than two stops`);
+    await this.kv.put(key, JSON.stringify(stops), { expirationTtl: TTL.schedule });
+    return stops;
+  }
+  async availability(trainNo, frm, to, on, cls, quota) {
+    const field = CT_FIELD[quota];
+    if (!field) return { ...parseStatus(""), raw: `${quota} quota is not covered by this source` };
+    const find = rows => rows.find(r => r.number === String(trainNo) && r.board === frm && r.alight === to);
+    // the pair the user searched often already holds this train (Delhi has several terminals)
+    let row = null;
+    for (const rows of this.pairs.values()) { row = find(rows); if (row && Object.values(row[field])[0]?.d === on) break; row = null; }
+    if (!row) row = find(await this.pair(frm, to, on));
+    if (!row) return na("not offered for this station pair");
+    const e = row[field][cls];
+    return e ? ctEntry(e, on) : na("class not offered for this station pair");
   }
 }

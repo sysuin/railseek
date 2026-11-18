@@ -15,7 +15,7 @@ python3 -m railseek serve --open
 Opens the search page at http://localhost:8765. It runs only on this computer and does everything
 the commands below do: search, ranked results, a booking sheet and key moments for each result,
 and watching with alerts while the tab stays open. Tick "Use demo data" under More options to try
-it without spending API requests. Without a key in `.env` it uses demo data automatically.
+it on invented trains.
 
 ## Public website
 
@@ -28,11 +28,12 @@ Python code on demo data.
 cd site && npm run deploy
 ```
 
-- One shared RapidAPI key, stored as a Pages secret, with limits in `site/wrangler.jsonc`:
-  `MONTHLY_CAP` (live requests a month; raise it if you move to a paid plan), `SEARCH_CAP` (per
-  check) and `VISITOR_DAILY_LIVE` (live searches per visitor per day).
-- Visitors pick a train and class, so one check spends at most 8 live requests. Answers are shared
-  between visitors for 10 minutes. When the allowance runs out, the site offers demo data only.
+- Live data comes from ConfirmTkt's public search (no key). Limits are in `site/wrangler.jsonc`:
+  `DAILY_CAP` (upstream requests a day for the whole site), `SEARCH_CAP` (per check) and
+  `VISITOR_DAILY_LIVE` (live searches per visitor per day). Setting `DATA_SOURCE` to `irctc1`
+  switches back to the RapidAPI key stored as the `RAPIDAPI_KEY` secret, capped by `MONTHLY_CAP`.
+- Visitors pick a train and class; one check spends at most 6 upstream requests. Answers are shared
+  between visitors for 10 minutes, and each result shows how long ago its figure was saved.
 - No watching or alerts on the public site, and nothing is stored about visitors beyond a hashed,
   one-day rate-limit counter.
 - `npm run dev` in `site/` runs it locally on port 8787 (demo data unless `site/.dev.vars` has a key).
@@ -45,26 +46,24 @@ python3 -m railseek search SSM NDLS tomorrow --also-to DLI,ANVT --provider demo
 
 ## Live data
 
-1. Subscribe to the unofficial "IRCTC" API on RapidAPI (host `irctc1.p.rapidapi.com`) and copy your key.
-2. Copy `.env.example` to `.env` and paste the key after `RAPIDAPI_KEY=`.
-3. Check the source answers before trusting a search:
+No setup is needed. The default source is ConfirmTkt's public train search, which has no key:
 
 ```bash
-python3 -m railseek probe trains SSM NDLS tomorrow
+python3 -m railseek search SSM NDLS tomorrow --quotas GN,TQ
 ```
 
-```bash
-python3 -m railseek search SSM NDLS tomorrow --also-from DDU,GAYA --also-to DLI,ANVT,NZM --classes 3A,SL,2A
-```
+- One request per station pair returns every train on it with availability, confirmation chance
+  and fare for all classes, in general and Tatkal quota. A full sweep of a busy route takes about
+  30 to 40 requests, paced at one a second.
+- The figures are ConfirmTkt's saved copies, not instant lookups. The "As of" column shows when
+  each was saved; some are minutes old, some a day or more. Confirm on IRCTC before paying.
+- It covers general (`GN`) and Tatkal (`TQ`) quota only.
+- It is an undocumented endpoint and can change or be blocked without notice. If a search returns
+  nothing, run `python3 -m railseek probe trains SSM NDLS tomorrow` and compare the raw response
+  with `railseek/providers/confirmtkt.py`.
 
-Plans (checked 17 Nov 2026): the free Basic plan allows 10 requests a month, enough to test only.
-Pro is $9.99 a month for 7,000. One full sweep of a busy route needs 100 or more requests, so on
-the free plan keep `--max-requests` small and narrow the search with `--trains` and `--classes`.
-
-The response parsing was checked on 17 Nov 2026 against real responses from the three endpoints
-used (train list, route, seat availability v2), and one narrow live search ran end to end.
-If a search returns nothing, run `probe` and compare the raw
-field names with `railseek/providers/irctc1.py`.
+`--provider irctc1` uses the unofficial "IRCTC" API on RapidAPI instead (key in `.env`, see
+`.env.example`). Its free plan allows 10 requests a month; it also covers ladies and senior quota.
 
 ## Key moments for a train
 
@@ -87,8 +86,8 @@ python3 -m railseek watch SSM NDLS 2026-11-19 --trains 12801,12397 --classes 3A,
 Repeats the search every 15 minutes (10 is the minimum) and sends a macOS notification when an
 option opens up (regret to waitlist, waitlist to RAC or seats), 10 minutes before Tatkal opens,
 and when the first chart is due. Leave the terminal open; Ctrl-C stops it. `--once` checks a
-single time. Every round spends API requests, so this needs a paid plan: one train and two
-classes at 15-minute intervals is roughly 8 to 30 requests an hour.
+single time. It reads ConfirmTkt's saved figures, so it notices a change only after ConfirmTkt
+refreshes its copy.
 
 ## Booking sheet
 

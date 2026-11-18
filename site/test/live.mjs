@@ -1,7 +1,7 @@
 // Live provider against a fake upstream: parsing, caching, allowance and refusal handling.
 import assert from "node:assert/strict";
 import { BudgetExceeded, search, serialize } from "../src/core.js";
-import { LiveProvider, Quota } from "../src/providers.js";
+import { ConfirmTktProvider, LiveProvider, Quota } from "../src/providers.js";
 
 class FakeKV { m = new Map(); async get(k, t) { const v = this.m.get(k); return v === undefined ? null : t === "json" ? JSON.parse(v) : v; } async put(k, v) { this.m.set(k, v); } }
 const now = Date.parse("2026-11-17T10:00:00+05:30");
@@ -58,4 +58,43 @@ const broken = new LiveProvider({ key: "k", kv, quota, perSearch: 8, now, fetche
 await assert.rejects(broken.trainsBetween("A", "B", "2026-11-18"), /did not answer/);
 assert.equal(quota.remaining, 10); assert.equal(quota.spent, 0);
 assert.doesNotThrow(() => new LiveProvider({ key: "k", kv, quota, perSearch: 8, now }));
+
+/* ---------- ConfirmTkt source ---------- */
+const E = (a, p, f, t = "2026-11-18T10:14:02.001", d = "2026-11-18T00:00:00") => ({ availability: a, predictionPercentage: p, fare: String(f), date: d, cacheTime: t });
+const ctPairs = {
+  "SSM:NDLS": [{ trainNumber: "12801", trainName: "PURUSHOTTAM SF", fromStnCode: "SSM", toStnCode: "ANVT", departureTime: "14:58", arrivalTime: "03:50", duration: 772, avlClasses: ["3A", "SL"],
+    availabilityCache: { "3A": E("REGRET", 0, 1280), SL: E("RLWL85/WL41", 20, 480) }, availabilityCacheTatkal: { "3A": E("NOT AVAILABLE", 0, 0), SL: E("AVAILABLE-0072#", 0, 640) } }],
+  "PURI:ANVT": [{ trainNumber: "12801", trainName: "PURUSHOTTAM SF", fromStnCode: "PURI", toStnCode: "ANVT", duration: 1795, avlClasses: ["3A"], availabilityCache: { "3A": E("GNWL40/WL12", 61, 2025, undefined, "2026-11-17T00:00:00") } }],
+  "DOS:ANVT": [{ trainNumber: "12801", trainName: "PURUSHOTTAM SF", fromStnCode: "DOS", toStnCode: "ANVT", duration: 790, avlClasses: ["3A"], availabilityCache: { "3A": E("RLWL9/WL5", 44, 1290) } }],
+  "GAYA:ANVT": [],
+};
+const ctSched = { Schedule: [["PURI", 1, "21:55"], ["GAYA", 2, "13:40"], ["DOS", 2, "14:42"], ["SSM", 2, "14:58"], ["ANVT", 3, ""]].map(([c, Day, t]) => ({ StationCode: c, StationName: c, Day, DepartureTime: t, ArrivalTime: t || "03:50" })) };
+let ctCalls = [];
+const ctFetch = async (url, init) => {
+  const u = new URL(url); ctCalls.push(u.pathname.split("/").pop() + ":" + (u.searchParams.get("sourceStationCode") || u.searchParams.get("trainNo")));
+  assert.equal(init.headers["X-RapidAPI-Key"], undefined);
+  if (u.pathname.endsWith("/schedule")) return Response.json(ctSched);
+  assert.match(u.searchParams.get("dateOfJourney"), /^\d\d-\d\d-\d{4}$/);
+  return Response.json({ data: { trainList: ctPairs[`${u.searchParams.get("sourceStationCode")}:${u.searchParams.get("destinationStationCode")}`] || [] } });
+};
+const ckv = new FakeKV();
+const mkct = async (cap = 100) => { const q = await new Quota(ckv, cap, now, "day", "ct:").load(); return { q, p: new ConfirmTktProvider({ kv: ckv, quota: q, perSearch: 8, fetcher: ctFetch }) }; };
+let c = await mkct();
+const trainsCt = await c.p.trainsBetween("SSM", "NDLS", "2026-11-18");
+assert.deepEqual(trainsCt.map(t => [t.number, t.name, t.alight, t.duration, t.gn]), [["12801", "Purushottam Sf", "ANVT", "12:52", undefined]]);
+const reqCt = { ...req, classes: ["3A"] };
+out = serialize(await search(c.p, reqCt), reqCt, false, now); await c.q.save();
+assert.deepEqual(ctCalls, ["search:SSM", "schedule:12801", "search:PURI", "search:DOS", "search:GAYA"], "exact pair reused from the train list");
+assert.deepEqual(out.options.map(o => [o.book_from, o.book_date, o.status, o.level, o.chance, o.fare, o.as_of]), [
+  ["PURI", "2026-11-17", "GNWL40/WL12", "waitlist", 61, 2025, "2026-11-18T10:14:02+05:30"],
+  ["DOS", "2026-11-18", "RLWL9/WL5", "waitlist", 44, 1290, "2026-11-18T10:14:02+05:30"],
+  ["SSM", "2026-11-18", "REGRET", "closed", null, 1280, "2026-11-18T10:14:02+05:30"],
+  ["GAYA", "2026-11-18", "not offered for this station pair", "closed", null, null, ""]]);
+const tq = { ...req, classes: ["SL"], quotas: ["TQ"] };
+c = await mkct(); ctCalls = [];
+out = serialize(await search(c.p, tq), tq, false, now);
+assert.equal(out.options[0].status, "AVAILABLE-0072#"); assert.equal(out.options[0].level, "available");
+assert.deepEqual(ctCalls, [], "second visitor is served from the shared cache");
+assert.equal((await new Quota(ckv, 100, now, "day", "ct:").load()).used, 5);
+assert.equal((await new Quota(ckv, 100, now).load()).used, 0, "RapidAPI and ConfirmTkt counters are separate");
 console.log("live provider OK");
