@@ -68,6 +68,18 @@ export function score(avail, tier = 0) {
 }
 const isBookable = a => !!a && ["AVAILABLE", "RAC", "WL"].includes(a.kind);
 
+// Short form of a status for a small chip: level drives the colour, label is the text.
+export function brief(a) {
+  if (!a) return null;
+  const level = { AVAILABLE: "available", RAC: "rac", WL: "waitlist", REGRET: "closed", NA: "closed", DEPARTED: "closed" }[a.kind] || "";
+  if (!level) return null;
+  const label = a.kind === "AVAILABLE" ? (a.count !== null ? `${a.count} seat${a.count === 1 ? "" : "s"}` : "Available")
+    : a.kind === "RAC" ? `RAC ${a.count ?? ""}`.trim()
+    : a.kind === "WL" ? `WL ${a.count ?? ""}`.trim()
+    : a.kind === "REGRET" ? "Regret" : a.kind === "DEPARTED" ? "Departed" : "N/A";
+  return { level, label, raw: a.raw, chance: a.kind === "WL" ? a.probability : null, as_of: a.fetched_at };
+}
+
 /* ---------- planning ---------- */
 const pyRound = x => { const f = Math.floor(x), d = x - f; return d > 0.5 ? f + 1 : d < 0.5 ? f : f % 2 === 0 ? f : f + 1; };
 const range = (a, b, step = 1) => { const o = []; for (let i = a; step > 0 ? i < b : i > b; i += step) o.push(i); return o; };

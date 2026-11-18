@@ -24,12 +24,14 @@
 <main class="wrap">
   <form class="card search" id="form" autocomplete="off">
     <div class="row">
-      <label class="f">From
-        <input class="code" type="text" id="origin" placeholder="Station code, e.g. SSM" maxlength="6" required>
+      <label class="f"><span>From <em class="stn" id="origin-name"></em></span>
+        <input class="code" type="text" id="origin" placeholder="Station name or code" maxlength="40" required role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="origin-list">
+        <ul class="suggest" id="origin-list" role="listbox" hidden></ul>
       </label>
       <button type="button" class="swap" id="swap" title="Swap stations" aria-label="Swap From and To">⇄</button>
-      <label class="f">To
-        <input class="code" type="text" id="dest" placeholder="Station code, e.g. NDLS" maxlength="6" required>
+      <label class="f"><span>To <em class="stn" id="dest-name"></em></span>
+        <input class="code" type="text" id="dest" placeholder="Station name or code" maxlength="40" required role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="dest-list">
+        <ul class="suggest" id="dest-list" role="listbox" hidden></ul>
       </label>
       <label class="f">Date
         <input type="date" id="date" required>
@@ -43,7 +45,9 @@
       <button class="btn wide" id="go" type="submit">Find trains</button>
     </div>
     <div class="sub">
-      <span class="lbl">Data</span>
+      <span class="lbl">Date</span>
+      <div class="chips" id="quick-dates"></div>
+      <span class="lbl gap">Data</span>
       <div class="seg" role="group" aria-label="Data source">
         <button type="button" id="mode-live" aria-pressed="false">Live</button>
         <button type="button" id="mode-demo" aria-pressed="true">Demo</button>

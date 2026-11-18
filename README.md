@@ -36,6 +36,13 @@ cd site && npm run deploy
   three at a time (`/api/top`): every class, general and Tatkal, booked directly and from each
   train's first station, at most two results per train. Batches keep each call inside the free
   plan's limit of 50 subrequests.
+- Class chips in the train list are coloured by seat status for the visitor's own station pair
+  (seats, RAC, waitlist, closed) with a short label, following the quota menu. The data comes with
+  the train list, so it costs no extra requests.
+- Stations can be typed by name or code. `site/public/stations.json` is built from the public
+  DataMeet station list (mid-2010s) with a few renamed stations patched by hand; unknown codes are
+  still accepted because the list is not complete.
+- A search updates the address bar (`?from=SSM&to=NDLS&date=...`), and opening such a link runs it.
 - Visitors can then tap a class on any train to check more station pairs; one such check spends at
   most 6 upstream requests. Answers are shared
   between visitors for 10 minutes, and each result shows how long ago its figure was saved.

@@ -176,3 +176,29 @@ footer.site p { margin: 4px 0; max-width: 78ch; }
 .hintrow { margin: 0 2px 8px; }
 .spin.inline { display: inline-block; width: 11px; height: 11px; margin-right: 7px; vertical-align: -1px; }
 #best .h2 { margin-top: 22px; }
+
+/* status chips, station search, legend */
+.train .chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; }
+.train .chip b { font-weight: 700; }
+.train .chip span { font-weight: 600; font-size: 12px; font-variant-numeric: tabular-nums; }
+.train .chip.available { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+.train .chip.rac { background: var(--rac-bg); color: var(--rac); border-color: transparent; }
+.train .chip.waitlist { background: var(--wl-bg); color: var(--wl); border-color: transparent; }
+.train .chip.closed { background: var(--closed-bg); color: var(--closed); border-color: transparent; }
+.train .chip.available:hover, .train .chip.rac:hover, .train .chip.waitlist:hover, .train .chip.closed:hover { border-color: currentColor; color: inherit; }
+.train .chip.on, .train .chip.on:hover { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+label.f { position: relative; }
+label.f .stn { font-style: normal; font-weight: 400; margin-left: 4px; }
+.suggest { position: absolute; top: 100%; left: 0; right: 0; z-index: 5; margin: 4px 0 0; padding: 4px; list-style: none; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(8,12,20,.18); max-height: 300px; overflow-y: auto; }
+.suggest li { display: flex; gap: 10px; align-items: baseline; padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 400; color: var(--text); }
+.suggest li b { min-width: 46px; font-weight: 700; }
+.suggest li span { color: var(--muted); }
+.suggest li.on, .suggest li:hover { background: var(--accent-soft); }
+.lbl.gap { margin-left: 10px; }
+details.legend { margin-top: 12px; font-size: 13px; color: var(--muted); }
+details.legend > summary { cursor: pointer; padding: 6px 2px; border-radius: 4px; }
+details.legend ul { list-style: none; margin: 6px 0 0; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+details.legend li { margin: 7px 0; }
+details.legend .st { margin-right: 6px; }
+details.legend b { color: var(--text); }
+@media (max-width: 860px) { .lbl.gap { margin-left: 0; } }

@@ -1,7 +1,7 @@
 // Public railseek site: static page plus a small JSON API.
 // Read-only: it searches and explains; it never logs in to IRCTC or books.
 
-import { ALL_CLASSES, ProviderError, addDays, istToday, search, serialize } from "./core.js";
+import { ALL_CLASSES, ProviderError, addDays, brief, istToday, search, serialize } from "./core.js";
 import { ConfirmTktProvider, DemoProvider, LiveProvider, Quota } from "./providers.js";
 
 const CODE = /^[A-Z]{1,6}$/, TRAIN = /^[0-9A-Z]{3,6}$/, QUOTAS = ["GN", "TQ"];
@@ -73,7 +73,10 @@ async function api(request, env, ctx, path) {
   const { provider, quota, demo } = await providerFor(request, env, body, now);
   try {
     if (path === "/api/trains") {
-      const trains = await provider.trainsBetween(j.origin, j.dest, j.on);
+      const hits = await provider.trainsBetween(j.origin, j.dest, j.on);
+      const st = provider.classStatuses ? await provider.classStatuses(j.origin, j.dest, j.on) : {};
+      const pack = m => Object.fromEntries(Object.entries(m || {}).map(([cls, a]) => [cls, brief(a)]).filter(([, b]) => b));
+      const trains = hits.map(t => ({ ...t, status: { GN: pack((st[t.number] || {}).GN), TQ: pack((st[t.number] || {}).TQ) } }));
       return json(200, { ...j, date: j.on, demo, trains, quota: quotaInfo(env, quota) });
     }
     if (path === "/api/top") {

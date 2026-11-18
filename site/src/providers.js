@@ -37,6 +37,14 @@ export class DemoProvider {
     }
     return hits;
   }
+  async classStatuses(frm, to, on) {
+    const out = {};
+    for (const t of await this.trainsBetween(frm, to)) {
+      out[t.number] = { GN: {}, TQ: {} };
+      for (const q of ["GN", "TQ"]) for (const c of t.classes) out[t.number][q][c] = await this.availability(t.number, frm, to, on, c, q);
+    }
+    return out;
+  }
   async schedule(trainNo) {
     if (!ROUTES[trainNo]) throw new ProviderError(`unknown demo train ${trainNo}`);
     return ROUTES[trainNo][2].map(([code, name, day, t], seq) => ({ code, name, seq, day, dep_min: +t.slice(0, 2) * 60 + +t.slice(3) }));
@@ -259,6 +267,11 @@ export class ConfirmTktProvider {
   }
   async trainsBetween(frm, to, on) {
     return (await this.pair(frm, to, on)).map(({ gn, tq, ...hit }) => hit);
+  }
+  // per train, the saved status of every class in both quotas; free once the pair is loaded
+  async classStatuses(frm, to, on) {
+    const each = map => Object.fromEntries(Object.entries(map).map(([cls, e]) => [cls, ctEntry(e, on)]));
+    return Object.fromEntries((await this.pair(frm, to, on)).map(r => [r.number, { GN: each(r.gn), TQ: each(r.tq) }]));
   }
   async schedule(trainNo) {
     const key = `c:cs:${trainNo}`;
