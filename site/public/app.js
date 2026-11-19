@@ -13,7 +13,7 @@ function h(tag, attrs, ...kids) {
 }
 const KIND = { "exact": "Direct", "earlier-origin": "Earlier origin", "later-destination": "Later destination", "both-extended": "Extended both ends", "alt-station": "Nearby station" };
 const rupee = n => "₹" + new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n);
-const shortDate = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+const shortDate = iso => new Date(iso + "T00:00:00").toLocaleDateString(window.RS_LOCALE || "en-IN", { day: "numeric", month: "short" });
 function age(stamp) {
   // "saved 3 h ago" for live figures; nothing for demo data
   if (!stamp || demo) return "";
@@ -98,13 +98,20 @@ async function loadStations() {
   try { stations = await (await fetch("/stations.json")).json(); showName("origin"); showName("dest"); } catch (e) { stations = null; }
 }
 
-function save() { try { localStorage.setItem("railseek.site", JSON.stringify({ origin: $("origin").value, dest: $("dest").value, quota: $("quota").value })); } catch (e) {} }
+function save() { try { localStorage.setItem("railseek.site", JSON.stringify({ origin: $("origin").value, dest: $("dest").value, quota: $("quota").value, pax: $("pax").value })); } catch (e) {} }
+const pax = () => Math.max(1, Math.min(6, parseInt($("pax").value, 10) || 1));
+function fareCell(fare) {
+  // per-person fare from the source, shown as the total for the group
+  if (fare === null || fare === undefined) return "";
+  const n = pax();
+  return n === 1 ? rupee(fare) : [rupee(fare * n), h("small", {}, `${rupee(fare)} × ${n}`)];
+}
 async function init() {
   meta = await (await fetch("/api/meta")).json();
   const d = $("date"); d.min = meta.today; d.max = meta.max_date;
   const t = new Date(meta.today + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + 1);
   d.value = t.toISOString().slice(0, 10);
-  try { const s = JSON.parse(localStorage.getItem("railseek.site") || "null"); if (s) { $("origin").value = s.origin || ""; $("dest").value = s.dest || ""; $("quota").value = s.quota || "GN"; } } catch (e) {}
+  try { const s = JSON.parse(localStorage.getItem("railseek.site") || "null"); if (s) { $("origin").value = s.origin || ""; $("dest").value = s.dest || ""; $("quota").value = s.quota || "GN"; $("pax").value = s.pax || "1"; } } catch (e) {}
   setMode(!meta.live_available);
   const day = n => { const x = new Date(meta.today + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
   $("quick-dates").replaceChildren(...[["Today", 0], ["Tomorrow", 1], ["Day after", 2]].map(([label, n]) =>
@@ -148,7 +155,7 @@ $("form").addEventListener("submit", async e => {
   $("origin").value = from; $("dest").value = to; showName("origin"); showName("dest");
   busy = true; save();
   const go = $("go"); go.disabled = true; go.replaceChildren(h("span", { class: "spin" }), "Finding");
-  const id = ++searchId; $("best").replaceChildren(); $("dates").replaceChildren(); $("conn").replaceChildren();
+  const id = ++searchId; for (const s of ["best", "dates", "conn", "nearby"]) $(s).replaceChildren();
   journey = { origin: from, dest: to, date: $("date").value, quota: $("quota").value, demo };
   try {
     const data = await post("/api/trains", journey);
@@ -159,6 +166,8 @@ $("form").addEventListener("submit", async e => {
     renderTrains(data);
     findBest(data).then(() => { if (id === searchId) findConnections(id); });
     findDates(id);
+    findNearby(id);
+    groupNotes();
   } catch (err) {
     banner("err", err.message); refreshMeta();
   } finally { busy = false; go.disabled = false; go.textContent = "Find trains"; }
@@ -168,7 +177,8 @@ async function refreshMeta() { try { updateQuota(await (await fetch("/api/meta")
 function renderTrains(d) {
   const box = [];
   box.push(h("div", { class: "summary" }, h("h2", {}, `${d.origin} → ${d.dest}`),
-    h("span", { class: "meta" }, new Date(d.date + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })),
+    h("button", { type: "button", class: "btn ghost sm", onclick: e => share(`Train options ${d.origin} to ${d.dest} on ${d.date}`, location.href, e.currentTarget) }, "Share search"),
+    h("span", { class: "meta" }, new Date(d.date + "T00:00:00").toLocaleDateString(window.RS_LOCALE || "en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })),
     h("span", { class: "meta" }, `${d.trains.length} train${d.trains.length === 1 ? "" : "s"}`)));
   if (d.demo) box.push(h("div", { class: "banner demo" }, "Demo data: these trains, timings and statuses are invented."));
   if (!d.trains.length) box.push(h("div", { class: "card empty mt" }, h("h3", {}, "No trains found for this route and date"),
@@ -220,6 +230,22 @@ function renderBest(all, done, total, failed) {
   else kids.push(h("div", { class: "card empty" }, h("div", {}, "Looking through every train and class.")));
   $("best").replaceChildren(...kids);
 }
+/* ---------- offline: keep the last search to show without a connection ---------- */
+function keepLast(best) {
+  try { localStorage.setItem("railseek.last", JSON.stringify({ journey, trains: lastTrains, best, saved: Date.now() })); } catch (e) {}
+}
+function showLast() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem("railseek.last") || "null"); } catch (e) {}
+  if (!s || !s.trains) { banner("err", "You are offline and there is no saved search to show."); return; }
+  journey = s.journey; lastTrains = s.trains;
+  $("origin").value = journey.origin; $("dest").value = journey.dest; $("date").value = journey.date;
+  const when = new Date(s.saved).toLocaleString(window.RS_LOCALE || "en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  banner("warn", `You are offline. This is your last search, saved ${when}. Figures will have changed since.`);
+  renderTrains(s.trains);
+  if (s.best && s.best.length) $("best").replaceChildren(h("h2", { class: "h2" }, "Best options", h("small", {}, `saved ${when}`)), h("div", { class: "card list" }, s.best.map((o, i) => optRow(o, i, true))));
+}
+
 async function findBest(d) {
   const id = searchId, all = [];
   timelines = {};
@@ -243,12 +269,58 @@ async function findBest(d) {
     }
     done += batch.length;
     renderBest(all, done, numbers.length, failed);
+    if (done >= numbers.length && !demo) keepLast(pickBest(all));
   }
+}
+
+/* ---------- sharing: the phone's share sheet, else WhatsApp ---------- */
+function shareText(o) {
+  const q = o.quota === "TQ" ? "Tatkal" : "General";
+  const board = o.board !== o.book_from ? `, board at ${o.board}` : "";
+  return `Train ${o.train} ${o.train_name}: book ${o.book_from} to ${o.book_to} on ${shortDate(o.book_date)}, ${o.cls}, ${q} quota${board}. Status ${o.status}` +
+    (o.chance !== null ? ` (${Math.round(o.chance)}% chance)` : "") + ". Check on IRCTC before paying.";
+}
+async function share(text, url, btn) {
+  if (navigator.share) {
+    try { await navigator.share({ title: "railseek", text, url }); return; } catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  window.open("https://wa.me/?text=" + encodeURIComponent(`${text}\n${url}`), "_blank", "noopener");
+  if (btn) { const old = btn.textContent; btn.textContent = "Opened WhatsApp"; setTimeout(() => btn.textContent = old, 1600); }
+}
+
+/* ---------- group size notes ---------- */
+function groupNotes() {
+  const n = pax();
+  if (n > 4 && journey.quota === "TQ") banner("warn", "A Tatkal ticket can carry at most 4 passengers. For a larger group you need two bookings, and they may not get berths together.");
+  else if (n > 1) banner("warn", `Fares are shown for ${n} passengers. On a waitlist, every passenger on one ticket has to confirm, so a large group confirms less often than one person.`);
+}
+$("pax").addEventListener("change", () => { save(); if (lastTrains) $("form").requestSubmit(); });
+
+/* ---------- start from a nearby station ---------- */
+async function findNearby(id) {
+  try {
+    const d = await post("/api/nearby", journey);
+    if (id !== searchId) return;
+    updateQuota(d.quota);
+    if (!d.stations.length || !d.options.length) return;
+    const kids = [h("h2", { class: "h2" }, "Start from a nearby station",
+      h("small", {}, d.stations.map(s => `${stName(s.code)} ${s.km} km`).join(", ") + ", straight-line distance"))];
+    kids.push(h("div", { class: "card list" }, d.options.map(o => h("button", { type: "button", class: "near", title: `Search from ${stName(o.station)}`,
+      onclick: () => { $("origin").value = o.station; showName("origin"); $("form").requestSubmit(); window.scrollTo({ top: 0 }); } },
+      h("span", {}, h("div", { class: "t1" }, `${o.train} ${o.train_name}`), h("div", { class: "t2" }, `from ${stName(o.station)} (${o.station}), about ${o.km} km away`)),
+      h("span", { class: "c-mid" }, h("div", { class: "pair" }, o.board, h("span", { class: "arrow" }, "→"), o.alight),
+        h("div", { class: "t2" }, `${o.depart} → ${o.arrive}  ·  ${o.cls}  ·  ${o.quota === "TQ" ? "Tatkal" : "General"}`)),
+      h("span", { class: "c-status" }, h("span", { class: "st " + o.level }, o.label),
+        h("div", { class: "t2" }, [o.chance !== null && o.chance !== undefined ? `${Math.round(o.chance)}% chance` : "", o.fare ? rupee(o.fare * pax()) : ""].filter(Boolean).join("  ·  ")))))));
+    kids.push(h("p", { class: "hint" }, "Trains that do not stop at your station. Tap one to search from that station. Allow time to get there; road distance is longer than shown."));
+    d.notes.forEach(n => kids.push(h("div", { class: "banner warn" }, n)));
+    $("nearby").replaceChildren(...kids);
+  } catch (e) { /* extra; the main search already worked */ }
 }
 
 /* ---------- flexible dates: the best option on nearby days ---------- */
 const stName = code => (stations && byCode().get(code)) || code;
-const dayLabel = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+const dayLabel = iso => new Date(iso + "T00:00:00").toLocaleDateString(window.RS_LOCALE || "en-IN", { weekday: "short", day: "numeric", month: "short" });
 async function findDates(id) {
   try {
     const d = await post("/api/dates", journey);
@@ -290,7 +362,8 @@ async function findConnections(id) {
     else {
       kids.push(h("div", { class: "card list" }, d.connections.map(c => h("div", { class: "conn" },
         h("div", { class: "connhead" }, h("b", {}, `Change at ${stName(c.hub)}`),
-          h("span", { class: "t2" }, `${hhmm(c.gap)} wait${c.tight ? " (tight)" : ""}  ·  ${hhmm(c.total_min)} in all`)),
+          h("span", { class: "t2" }, `${hhmm(c.gap)} wait${c.tight ? " (tight)" : ""}  ·  ${hhmm(c.total_min)} in all`
+            + (c.legs.every(l => l.fare) ? `  ·  ${rupee((c.legs[0].fare + c.legs[1].fare) * pax())}${pax() > 1 ? ` for ${pax()}` : ""}` : ""))),
         legLine(c.legs[0], 1), legLine(c.legs[1], 2),
         h("div", { class: "actions" }, h("button", { type: "button", class: "btn ghost", onclick: e => copyConn(c, e.currentTarget) }, "Copy both tickets"))))));
       kids.push(h("p", { class: "hint" }, "These are two separate tickets. If the first train runs late you can miss the second, and the second ticket is not refunded for that. Leave a longer wait where you can."));
@@ -332,7 +405,7 @@ function optRow(o, i, clickable) {
       h("div", { class: "t2" }, `${shortDate(o.book_date)}  ·  ${o.cls}  ·  ${o.quota === "TQ" ? "Tatkal" : "General"}`)),
     h("span", { class: "c-status" }, h("span", { class: "st " + o.level }, o.status),
       h("div", { class: "t2" }, [o.chance !== null ? `${Math.round(o.chance)}% chance` : "", age(o.as_of)].filter(Boolean).join("  ·  "))),
-    h("span", { class: "fare" }, o.fare !== null ? rupee(o.fare) : ""),
+    h("span", { class: "fare" }, fareCell(o.fare)),
     h("span", { class: "chev", "aria-hidden": "true" }, clickable ? "›" : ""),
     clickable ? h("span", { class: "how" }, o.how) : null,
   ];
@@ -369,6 +442,7 @@ function openDrawer(o, from) {
   const s = o.sheets[0], body = [sheetBlock(s)];
   body.push(h("h3", {}, "Be ready"), h("ul", { class: "plain ready" }, s.checklist.map(x => h("li", {}, h("label", {}, h("input", { type: "checkbox" }), h("span", {}, x))))));
   body.push(h("div", { class: "actions" }, h("a", { class: "btn", href: "https://www.irctc.co.in/nget/train-search", target: "_blank", rel: "noopener noreferrer" }, "Open IRCTC"),
+    h("button", { class: "btn ghost", type: "button", onclick: e => share(shareText(o), location.href, e.currentTarget) }, "Share"),
     h("button", { class: "btn ghost", type: "button", onclick: e => copySheet(o, e.currentTarget) }, "Copy details")));
   const tl = (last && last.timelines[o.train]) || timelines[o.train];
   if (tl) body.push(h("h3", {}, `Key moments, boarding at ${o.board}`), h("ul", { class: "tl" }, tl.map(e => h("li", { class: (e.passed ? "passed " : "") + (e.next ? "next" : "") },
@@ -391,4 +465,8 @@ $("d-close").addEventListener("click", closeDrawer);
 $("scrim").addEventListener("click", closeDrawer);
 document.addEventListener("keydown", e => { if (e.key === "Escape" && $("drawer").classList.contains("on")) closeDrawer(); });
 
-init().catch(() => banner("err", "Could not load the site. Please refresh."));
+init().catch(() => {
+  meta = meta || { today: new Date().toISOString().slice(0, 10), max_date: "", live_available: false, period: "day" };
+  showLast();
+});
+if ("serviceWorker" in navigator) addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));

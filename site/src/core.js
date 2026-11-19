@@ -77,7 +77,7 @@ export function brief(a) {
     : a.kind === "RAC" ? `RAC ${a.count ?? ""}`.trim()
     : a.kind === "WL" ? `WL ${a.count ?? ""}`.trim()
     : a.kind === "REGRET" ? "Regret" : a.kind === "DEPARTED" ? "Departed" : "N/A";
-  return { level, label, raw: a.raw, chance: a.kind === "WL" ? a.probability : null, as_of: a.fetched_at };
+  return { level, label, raw: a.raw, chance: a.kind === "WL" ? a.probability : null, fare: a.fare, as_of: a.fetched_at };
 }
 
 /* ---------- planning ---------- */

@@ -1,6 +1,7 @@
 // Flexible dates, connecting journeys through hubs, and a data-source health check.
 
 import { AccessDenied, BudgetExceeded, ProviderError, addDays, brief, istAt, istToday, score } from "./core.js";
+import { COORDS } from "./coords.js";
 
 /* ---------- fall back to a second source when the first fails ---------- */
 export class FallbackProvider {
@@ -106,7 +107,7 @@ export function pickHubs(stopsList, origin, dest, limit = 2) {
 function leg(t, b, on, fromCode, toCode) {
   const dep = istAt(on, hm(t.depart)), dur = durationMin(t);
   return { train: t.number, train_name: t.name.trim(), from: fromCode, to: toCode, date: on, depart: t.depart, arrive: t.arrive,
-    dep_ms: dep, arr_ms: dur === null ? null : dep + dur * 60000, cls: b.cls, quota: b.quota, level: b.level, label: b.label, raw: b.raw, chance: b.chance, as_of: b.as_of, score: b.score };
+    dep_ms: dep, arr_ms: dur === null ? null : dep + dur * 60000, cls: b.cls, quota: b.quota, level: b.level, label: b.label, raw: b.raw, chance: b.chance, fare: b.fare, as_of: b.as_of, score: b.score };
 }
 
 export async function connections(provider, j, now, { maxHubs = 2, minGap = 60, maxGap = 8 * 60 } = {}) {
@@ -165,6 +166,56 @@ export async function connections(provider, j, now, { maxHubs = 2, minGap = 60, 
     if (out.length === 5) break;
   }
   return { hubs, connections: out, notes };
+}
+
+/* ---------- nearby starting stations ---------- */
+export function distanceKm(a, b) {
+  const p = COORDS[a], q = COORDS[b];
+  if (!p || !q) return null;
+  const rad = x => (x * Math.PI) / 180, dLat = rad(q[0] - p[0]), dLng = rad(q[1] - p[1]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(p[0])) * Math.cos(rad(q[0])) * Math.sin(dLng / 2) ** 2;
+  return Math.round(12742 * Math.asin(Math.sqrt(h)));
+}
+
+export function nearbyStations(origin, dest, { maxKm = 150, limit = 3 } = {}) {
+  // big junctions within reach of your station, nearest first (straight-line distance)
+  const out = [];
+  for (const code of HUBS) {
+    if (code === origin || code === dest) continue;
+    const km = distanceKm(origin, code);
+    if (km !== null && km <= maxKm && km >= 5) out.push({ code, km });
+  }
+  const toDest = distanceKm(origin, dest);
+  return out.filter(s => toDest === null || (distanceKm(s.code, dest) ?? 0) < toDest + 100)   // not a step backwards
+    .sort((a, b) => a.km - b.km).slice(0, limit);
+}
+
+export async function nearbyStarts(provider, j, now) {
+  const notes = [];
+  const direct = new Set((await provider.trainsBetween(j.origin, j.dest, j.on)).map(t => t.number));
+  const stations = nearbyStations(j.origin, j.dest);
+  const found = [];
+  for (const s of stations) {
+    try {
+      const trains = await provider.trainsBetween(s.code, j.dest, j.on);
+      const st = provider.classStatuses ? await provider.classStatuses(s.code, j.dest, j.on) : {};
+      for (const t of trains) {
+        if (direct.has(t.number)) continue;   // also stops at your station: already in the main results
+        const b = bestOf(st[t.number], t.classes, tatkalOpen(j.on, now));
+        if (b) found.push({ station: s.code, km: s.km, train: t.number, train_name: t.name.trim(), board: t.board, alight: t.alight,
+          depart: t.depart, arrive: t.arrive, duration: t.duration, ...b });
+      }
+    } catch (e) {
+      if (!(e instanceof ProviderError)) throw e;
+      notes.push(`Trains from ${s.code} could not be checked: ${e.message}`);
+      if (e instanceof BudgetExceeded || e instanceof AccessDenied) break;
+    }
+  }
+  // one entry per train: the station with the best odds, the nearer one on a tie
+  found.sort((a, b) => b.score - a.score || a.km - b.km);
+  const seen = new Set(), options = [];
+  for (const o of found) { if (!seen.has(o.train)) { seen.add(o.train); options.push(o); } if (options.length === 5) break; }
+  return { stations, options, notes };
 }
 
 /* ---------- health check ---------- */

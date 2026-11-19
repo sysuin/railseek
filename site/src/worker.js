@@ -3,7 +3,7 @@
 
 import { ALL_CLASSES, ProviderError, addDays, brief, istToday, search, serialize } from "./core.js";
 import { ConfirmTktProvider, DemoProvider, LiveProvider, Quota } from "./providers.js";
-import { FallbackProvider, connections, flexibleDates, healthCheck, tatkalOpen } from "./plans.js";
+import { FallbackProvider, connections, flexibleDates, healthCheck, nearbyStarts, tatkalOpen } from "./plans.js";
 import { CacheStore } from "./store.js";
 
 const CODE = /^[A-Z]{1,6}$/, TRAIN = /^[0-9A-Z]{3,6}$/, QUOTAS = ["GN", "TQ"];
@@ -88,7 +88,7 @@ async function api(request, env, ctx, path) {
     }
     return json(result.ok ? 200 : 503, result);
   }
-  if (request.method !== "POST" || !["/api/trains", "/api/check", "/api/top", "/api/dates", "/api/connections"].includes(path)) return json(404, { error: "Not found" });
+  if (request.method !== "POST" || !["/api/trains", "/api/check", "/api/top", "/api/dates", "/api/connections", "/api/nearby"].includes(path)) return json(404, { error: "Not found" });
   if (!(request.headers.get("Content-Type") || "").includes("application/json")) return json(415, { error: "JSON only" });
   const origin = request.headers.get("Origin");
   if (origin && origin !== new URL(request.url).origin) return json(403, { error: "Cross-site requests are not allowed" });
@@ -97,7 +97,7 @@ async function api(request, env, ctx, path) {
   if (!body || typeof body !== "object") return json(400, { error: "Bad request" });
 
   const j = journey(body, now);
-  body.__perSearch = path === "/api/connections" ? 10 : path === "/api/dates" ? 6 : null;
+  body.__perSearch = path === "/api/connections" ? 10 : path === "/api/dates" || path === "/api/nearby" ? 6 : null;
   const { provider, quota, demo } = await providerFor(request, env, body, now);
   try {
     if (path === "/api/trains") {
@@ -109,6 +109,9 @@ async function api(request, env, ctx, path) {
     }
     if (path === "/api/dates") {
       return json(200, { ...j, date: j.on, demo, days: await flexibleDates(provider, j, now), quota: quotaInfo(env, quota) });
+    }
+    if (path === "/api/nearby") {
+      return json(200, { ...j, date: j.on, demo, ...(await nearbyStarts(provider, j, now)), quota: quotaInfo(env, quota) });
     }
     if (path === "/api/connections") {
       const r = await connections(provider, j, now);
