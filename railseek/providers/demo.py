@@ -54,6 +54,16 @@ _ROUTES = {
             ("KLK", "Kalka", 3, "03:00"),
         ],
     ),
+    "90004": (
+        "Demo Junction Express",
+        ["SL", "3A", "2A"],
+        [
+            ("DDU", "Pt DD Upadhyaya Jn", 1, "19:30"),
+            ("PRYJ", "Prayagraj Jn", 1, "21:40"),
+            ("CNB", "Kanpur Central", 2, "00:10"),
+            ("NDLS", "New Delhi", 2, "06:00"),
+        ],
+    ),
 }
 
 
@@ -69,6 +79,8 @@ def _status(train, frm_idx, to_idx, n_stops, cls) -> tuple[str, float | None]:
         if from_origin:
             return ("AVAILABLE-0014" if cls in ("3A", "3E") else "RAC 12"), 90.0
         return ("PQWL44/WL31" if cls == "SL" else "REGRET"), 12.0
+    if train == "90004":
+        return ("RAC 3" if cls == "2A" else "AVAILABLE-0020"), 90.0
     # 90003
     if frm_idx <= 1:
         return "GNWL22/WL11", 70.0

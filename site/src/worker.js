@@ -3,6 +3,8 @@
 
 import { ALL_CLASSES, ProviderError, addDays, brief, istToday, search, serialize } from "./core.js";
 import { ConfirmTktProvider, DemoProvider, LiveProvider, Quota } from "./providers.js";
+import { FallbackProvider, connections, flexibleDates, healthCheck, tatkalOpen } from "./plans.js";
+import { CacheStore } from "./store.js";
 
 const CODE = /^[A-Z]{1,6}$/, TRAIN = /^[0-9A-Z]{3,6}$/, QUOTAS = ["GN", "TQ"];
 const TOP_BATCH = 3;
@@ -31,24 +33,38 @@ async function visitorAllowed(request, env, now) {
   const day = istToday(now);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${day}|${ip}|railseek`));
   const key = "v:" + [...new Uint8Array(digest)].slice(0, 12).map(b => b.toString(16).padStart(2, "0")).join("");
-  const used = +(await env.KV.get(key) || 0);
+  const store = CacheStore.open();   // not KV: free KV allows only 1,000 writes a day
+  const used = +(await store.get(key) || 0);
   if (used >= limit) return false;
-  await env.KV.put(key, String(used + 1), { expirationTtl: 86400 });
+  await store.put(key, String(used + 1), { expirationTtl: 86400 });
   return true;
 }
 
 // DATA_SOURCE "confirmtkt" (default, no key) or "irctc1" (RapidAPI key with a monthly allowance)
 const source = env => (env.DATA_SOURCE === "irctc1" && env.RAPIDAPI_KEY ? "irctc1" : "confirmtkt");
+// The RapidAPI allowance is small and strict, so it is counted in KV (a few writes a month).
+// ConfirmTkt's politeness cap is counted in the Cache API store, per data centre.
+const rapidQuota = (env, now) => new Quota(env.KV, num(env, "MONTHLY_CAP", 10), now).load();
 const loadQuota = (env, now) => (source(env) === "irctc1"
-  ? new Quota(env.KV, num(env, "MONTHLY_CAP", 10), now)
-  : new Quota(env.KV, num(env, "DAILY_CAP", 1500), now, "day", "ct:")).load();
+  ? rapidQuota(env, now)
+  : new Quota(CacheStore.open(), num(env, "DAILY_CAP", 3000), now, "day", "ct:").load());
 
 async function providerFor(request, env, body, now) {
   const quota = await loadQuota(env, now);
   if (body.demo) return { provider: new DemoProvider(now), quota, demo: true };
   if (!(await visitorAllowed(request, env, now))) throw new BadRequest("You have reached today's limit for live searches. Demo data still works.");
-  const opts = { kv: env.KV, quota, perSearch: num(env, "SEARCH_CAP", 8), now, base: env.UPSTREAM_BASE };
-  const provider = source(env) === "irctc1" ? new LiveProvider({ ...opts, key: env.RAPIDAPI_KEY }) : new ConfirmTktProvider(opts);
+  const perSearch = body.__perSearch || num(env, "SEARCH_CAP", 8);
+  const opts = { quota, perSearch, now, base: env.UPSTREAM_BASE };
+  if (source(env) === "irctc1") return { provider: new LiveProvider({ ...opts, kv: env.KV, key: env.RAPIDAPI_KEY }), quota, demo: false };
+  const primary = new ConfirmTktProvider({ ...opts, kv: CacheStore.open() });
+  const backup = env.RAPIDAPI_KEY ? async () => {
+    const q = await rapidQuota(env, now);
+    backupQuota = q;
+    return q.remaining > 0 ? new LiveProvider({ ...opts, quota: q, kv: env.KV, key: env.RAPIDAPI_KEY }) : null;
+  } : async () => null;
+  let backupQuota = null;
+  const provider = new FallbackProvider(primary, backup);
+  provider.saveBackup = () => (backupQuota ? backupQuota.save() : null);
   return { provider, quota, demo: false };
 }
 
@@ -61,7 +77,18 @@ async function api(request, env, ctx, path) {
     const today = istToday(now);
     return json(200, { today, max_date: addDays(today, 62), classes: ALL_CLASSES, ...quotaInfo(env, quota) });
   }
-  if (request.method !== "POST" || !["/api/trains", "/api/check", "/api/top"].includes(path)) return json(404, { error: "Not found" });
+  if (path === "/api/health" && request.method === "GET") {
+    // checked at most every 10 minutes, so calling this often cannot load the data source
+    const store = CacheStore.open();
+    let result = await store.get("health", "json");
+    if (!result) {
+      const q = new Quota({ get: async () => null, put: async () => {} }, 10, now, "day", "health:");
+      result = { ...(await healthCheck(() => new ConfirmTktProvider({ kv: { get: async () => null, put: async () => {} }, quota: q, perSearch: 4, now, base: env.UPSTREAM_BASE }), now)), checked_at: new Date(now).toISOString() };
+      await store.put("health", JSON.stringify(result), { expirationTtl: 600 });
+    }
+    return json(result.ok ? 200 : 503, result);
+  }
+  if (request.method !== "POST" || !["/api/trains", "/api/check", "/api/top", "/api/dates", "/api/connections"].includes(path)) return json(404, { error: "Not found" });
   if (!(request.headers.get("Content-Type") || "").includes("application/json")) return json(415, { error: "JSON only" });
   const origin = request.headers.get("Origin");
   if (origin && origin !== new URL(request.url).origin) return json(403, { error: "Cross-site requests are not allowed" });
@@ -70,6 +97,7 @@ async function api(request, env, ctx, path) {
   if (!body || typeof body !== "object") return json(400, { error: "Bad request" });
 
   const j = journey(body, now);
+  body.__perSearch = path === "/api/connections" ? 10 : path === "/api/dates" ? 6 : null;
   const { provider, quota, demo } = await providerFor(request, env, body, now);
   try {
     if (path === "/api/trains") {
@@ -79,12 +107,19 @@ async function api(request, env, ctx, path) {
       const trains = hits.map(t => ({ ...t, status: { GN: pack((st[t.number] || {}).GN), TQ: pack((st[t.number] || {}).TQ) } }));
       return json(200, { ...j, date: j.on, demo, trains, quota: quotaInfo(env, quota) });
     }
+    if (path === "/api/dates") {
+      return json(200, { ...j, date: j.on, demo, days: await flexibleDates(provider, j, now), quota: quotaInfo(env, quota) });
+    }
+    if (path === "/api/connections") {
+      const r = await connections(provider, j, now);
+      return json(200, { ...j, date: j.on, demo, ...r, quota: quotaInfo(env, quota) });
+    }
     if (path === "/api/top") {
       // Best options for a few trains at a time: every class, general and Tatkal, direct and
       // booked from the train's first station. Small batches keep each call within platform limits.
       const trains = (Array.isArray(body.trains) ? body.trains : []).map(t => String(t).trim().toUpperCase());
       if (!trains.length || trains.length > TOP_BATCH || !trains.every(t => TRAIN.test(t))) throw new BadRequest("Bad train list.");
-      const req = { ...j, also_from: [], also_to: [], classes: [], quotas: ["GN", "TQ"], trains, upstream: 1, downstream: 0 };
+      const req = { ...j, also_from: [], also_to: [], classes: [], quotas: tatkalOpen(j.on, now) ? ["GN", "TQ"] : ["GN"], trains, upstream: 1, downstream: 0 };
       const result = await search(provider, req);
       const open = result.options.filter(o => o.score > 0);
       result.options = open.slice(0, 8);
@@ -98,6 +133,7 @@ async function api(request, env, ctx, path) {
     return json(200, { ...serialize(result, req, demo, now), quota: quotaInfo(env, quota) });
   } finally {
     ctx.waitUntil(quota.save());
+    if (provider.saveBackup) ctx.waitUntil(Promise.resolve(provider.saveBackup()));
   }
 }
 

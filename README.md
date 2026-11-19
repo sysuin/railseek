@@ -46,6 +46,16 @@ cd site && npm run deploy
 - Visitors can then tap a class on any train to check more station pairs; one such check spends at
   most 6 upstream requests. Answers are shared
   between visitors for 10 minutes, and each result shows how long ago its figure was saved.
+- Each search also shows the best option on nearby dates (the day before to two days after) and up
+  to five two-train journeys changing at a big junction on the route (for example DDU or Prayagraj),
+  with a 1 to 8 hour wait. Tatkal figures only count once Tatkal is open for that date.
+- Caches and politeness counters use Cloudflare's Cache API, because free KV allows only 1,000
+  writes a day. Those counters are per Cloudflare location, so the caps are approximate. KV is kept
+  for the strict RapidAPI allowance.
+- If ConfirmTkt fails and a `RAPIDAPI_KEY` secret exists, searches fall back to RapidAPI while its
+  monthly allowance lasts.
+- `/api/health` checks the data source (at most every 10 minutes). The GitHub Actions workflow in
+  `.github/workflows/health.yml` calls it every 6 hours, so a broken source sends you an email.
 - No watching or alerts on the public site, and nothing is stored about visitors beyond a hashed,
   one-day rate-limit counter.
 - `npm run dev` in `site/` runs it locally on port 8787 (demo data unless `site/.dev.vars` has a key).

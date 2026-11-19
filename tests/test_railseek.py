@@ -80,7 +80,7 @@ class PlanTests(unittest.TestCase):
 class SearchTests(unittest.TestCase):
     def test_demo_finds_workaround(self):
         res = search(DemoProvider(), SearchRequest("SSM", "NDLS", D, also_to=["DLI"], also_from=["DDU"]))
-        self.assertEqual(res.trains_found, 3)
+        self.assertEqual(res.trains_found, 4)  # 90004 starts at DDU, one of the also_from stations
         best = res.options[0]
         self.assertEqual(best.legs[0].avail.kind, "AVAILABLE")
         self.assertEqual(best.kind, "earlier-origin")

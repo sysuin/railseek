@@ -13,6 +13,8 @@ const ROUTES = {
   "90003": ["Demo Eastern Mail", ["SL", "3A", "2A"], [
     ["HWH", "Howrah Jn", 1, "21:55"], ["DHN", "Dhanbad Jn", 2, "02:10"], ["GAYA", "Gaya Jn", 2, "05:05"], ["SSM", "Sasaram", 2, "06:29"], ["DDU", "Pt DD Upadhyaya Jn", 2, "08:20"],
     ["CNB", "Kanpur Central", 2, "13:40"], ["DLI", "Delhi Jn", 2, "20:30"], ["KLK", "Kalka", 3, "03:00"]]],
+  "90004": ["Demo Junction Express", ["SL", "3A", "2A"], [
+    ["DDU", "Pt DD Upadhyaya Jn", 1, "19:30"], ["PRYJ", "Prayagraj Jn", 1, "21:40"], ["CNB", "Kanpur Central", 2, "00:10"], ["NDLS", "New Delhi", 2, "06:00"]]],
 };
 const MULT = { SL: 1, "3E": 2.4, "3A": 2.6, "2A": 3.7, "1A": 6.2 };
 
@@ -21,6 +23,7 @@ function demoStatus(train, f, t, n, cls) {
   if (cls === "1A") return [fromOrigin ? "GNWL4/WL3" : "PQWL5/WL4", 45];
   if (train === "90001") return fromOrigin ? [cls === "2A" ? "AVAILABLE-0006" : "GNWL18/WL9", 78] : ["REGRET", null];
   if (train === "90002") return fromOrigin ? [cls === "3A" || cls === "3E" ? "AVAILABLE-0014" : "RAC 12", 90] : [cls === "SL" ? "PQWL44/WL31" : "REGRET", 12];
+  if (train === "90004") return [cls === "2A" ? "RAC 3" : "AVAILABLE-0020", 90];
   if (f <= 1) return ["GNWL22/WL11", 70];
   if (t === n - 1 && f >= 3) return ["RLWL9/WL6", 40];
   return [cls === "SL" ? "RLWL30/WL24" : "REGRET", 8];

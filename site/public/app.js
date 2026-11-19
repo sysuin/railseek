@@ -23,6 +23,7 @@ function age(stamp) {
   if (mins < 48 * 60) return `saved ${Math.round(mins / 60)} h ago`;
   return `saved ${Math.round(mins / 1440)} days ago`;
 }
+const tomorrowIso = () => { const x = new Date(meta.today + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); };
 let searchId = 0, timelines = {}, lastTrains = null, stations = null;
 let meta = null, journey = null, last = null, busy = false, lastFocus = null, demo = true;
 
@@ -147,7 +148,7 @@ $("form").addEventListener("submit", async e => {
   $("origin").value = from; $("dest").value = to; showName("origin"); showName("dest");
   busy = true; save();
   const go = $("go"); go.disabled = true; go.replaceChildren(h("span", { class: "spin" }), "Finding");
-  searchId++; $("best").replaceChildren();
+  const id = ++searchId; $("best").replaceChildren(); $("dates").replaceChildren(); $("conn").replaceChildren();
   journey = { origin: from, dest: to, date: $("date").value, quota: $("quota").value, demo };
   try {
     const data = await post("/api/trains", journey);
@@ -156,7 +157,8 @@ $("form").addEventListener("submit", async e => {
     lastTrains = data;
     try { history.replaceState(null, "", "?" + new URLSearchParams({ from, to, date: journey.date, quota: journey.quota })); } catch (e) {}
     renderTrains(data);
-    findBest(data);
+    findBest(data).then(() => { if (id === searchId) findConnections(id); });
+    findDates(id);
   } catch (err) {
     banner("err", err.message); refreshMeta();
   } finally { busy = false; go.disabled = false; go.textContent = "Find trains"; }
@@ -211,7 +213,7 @@ function pickBest(all) {
 }
 function renderBest(all, done, total, failed) {
   const top = pickBest(all), working = done < total;
-  const status = working ? `checking trains, ${done} of ${total} done` : failed ? "some trains could not be checked" : `from ${total} train${total === 1 ? "" : "s"}, all classes, general and Tatkal`;
+  const status = working ? `checking trains, ${done} of ${total} done` : failed ? "some trains could not be checked" : `from ${total} train${total === 1 ? "" : "s"}, all classes, ${journey.date <= tomorrowIso() ? "general and Tatkal" : "general quota (Tatkal opens the day before travel)"}`;
   const kids = [h("h2", { class: "h2" }, "Best options", h("small", { role: "status" }, working ? h("span", { class: "spin inline" }) : null, status))];
   if (top.length) kids.push(h("div", { class: "card list" }, top.map((o, i) => optRow(o, i, true))));
   else if (!working) kids.push(h("div", { class: "card empty" }, h("h3", {}, "Nothing bookable right now"), h("div", {}, "Every class on every train is closed for this date. Try another date, or look again after the first chart is prepared.")));
@@ -219,7 +221,7 @@ function renderBest(all, done, total, failed) {
   $("best").replaceChildren(...kids);
 }
 async function findBest(d) {
-  const id = ++searchId, all = [];
+  const id = searchId, all = [];
   timelines = {};
   $("best").replaceChildren();
   const numbers = d.trains.map(t => t.number);
@@ -242,6 +244,65 @@ async function findBest(d) {
     done += batch.length;
     renderBest(all, done, numbers.length, failed);
   }
+}
+
+/* ---------- flexible dates: the best option on nearby days ---------- */
+const stName = code => (stations && byCode().get(code)) || code;
+const dayLabel = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+async function findDates(id) {
+  try {
+    const d = await post("/api/dates", journey);
+    if (id !== searchId) return;
+    updateQuota(d.quota);
+    if (d.days.length < 2) return;
+    $("dates").replaceChildren(h("h2", { class: "h2" }, "Nearby dates", h("small", {}, "best option each day for your stations")),
+      h("div", { class: "days" }, d.days.map(day => {
+        const b = day.best;
+        const body = day.error ? [h("span", { class: "t2" }, "could not check")]
+          : b ? [h("span", { class: "st " + b.level }, b.label), h("span", { class: "t2" }, `${b.cls} · ${b.train}${b.chance !== null ? ` · ${Math.round(b.chance)}%` : ""}`)]
+          : [h("span", { class: "st closed" }, day.trains ? "All closed" : "No trains")];
+        return h("button", { type: "button", class: "day" + (day.selected ? " on" : ""), "aria-pressed": String(day.selected), disabled: day.selected || null,
+          title: b ? `${b.train} ${b.train_name}, ${b.raw}` : null,
+          onclick: () => { $("date").value = day.date; $("form").requestSubmit(); } },
+          h("b", {}, dayLabel(day.date)), ...body, h("span", { class: "t2" }, `${day.open} of ${day.trains} trains bookable`));
+      })));
+  } catch (e) { /* nearby dates are extra; the main search already worked */ }
+}
+
+/* ---------- connecting journeys through a hub ---------- */
+const hhmm = min => `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ""}`;
+function legLine(l, n) {
+  return h("div", { class: "leg" }, h("span", { class: "legn" }, String(n)),
+    h("span", {}, h("div", { class: "t1" }, `${l.train} ${l.train_name}`),
+      h("div", { class: "t2" }, `${l.from} ${l.depart} → ${l.to} ${l.arrive}  ·  ${shortDate(l.date)}  ·  ${l.cls}  ·  ${l.quota === "TQ" ? "Tatkal" : "General"}`)),
+    h("span", { class: "c-status" }, h("span", { class: "st " + l.level }, l.label),
+      h("div", { class: "t2" }, [l.chance !== null && l.chance !== undefined ? `${Math.round(l.chance)}% chance` : "", age(l.as_of)].filter(Boolean).join("  ·  "))));
+}
+async function findConnections(id) {
+  try {
+    const d = await post("/api/connections", journey);
+    if (id !== searchId) return;
+    updateQuota(d.quota);
+    if (!d.hubs.length) return;
+    const hubs = d.hubs.map(c => `${stName(c)} (${c})`).join(" or ");
+    const kids = [h("h2", { class: "h2" }, "Change trains", h("small", {}, `via ${hubs}`))];
+    if (!d.connections.length) kids.push(h("div", { class: "card empty" }, h("div", {}, `No bookable two-train journey via ${hubs} with a 1 to 8 hour wait.`)));
+    else {
+      kids.push(h("div", { class: "card list" }, d.connections.map(c => h("div", { class: "conn" },
+        h("div", { class: "connhead" }, h("b", {}, `Change at ${stName(c.hub)}`),
+          h("span", { class: "t2" }, `${hhmm(c.gap)} wait${c.tight ? " (tight)" : ""}  ·  ${hhmm(c.total_min)} in all`)),
+        legLine(c.legs[0], 1), legLine(c.legs[1], 2),
+        h("div", { class: "actions" }, h("button", { type: "button", class: "btn ghost", onclick: e => copyConn(c, e.currentTarget) }, "Copy both tickets"))))));
+      kids.push(h("p", { class: "hint" }, "These are two separate tickets. If the first train runs late you can miss the second, and the second ticket is not refunded for that. Leave a longer wait where you can."));
+    }
+    d.notes.forEach(n => kids.push(h("div", { class: "banner warn" }, n)));
+    $("conn").replaceChildren(...kids);
+  } catch (e) { /* connections are extra */ }
+}
+async function copyConn(c, btn) {
+  const text = c.legs.map((l, i) => `Ticket ${i + 1}: train ${l.train}, ${l.from} to ${l.to}, ${l.date}, class ${l.cls}, quota ${l.quota}`).join("\n");
+  try { await navigator.clipboard.writeText(text); btn.textContent = "Copied"; } catch (e) { btn.textContent = "Copy failed"; }
+  setTimeout(() => btn.textContent = "Copy both tickets", 1600);
 }
 
 /* ---------- step 2: check one train and class ---------- */

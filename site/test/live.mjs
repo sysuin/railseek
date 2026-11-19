@@ -1,6 +1,6 @@
 // Live provider against a fake upstream: parsing, caching, allowance and refusal handling.
 import assert from "node:assert/strict";
-import { BudgetExceeded, search, serialize } from "../src/core.js";
+import { BudgetExceeded, ProviderError, search, serialize } from "../src/core.js";
 import { ConfirmTktProvider, LiveProvider, Quota } from "../src/providers.js";
 
 class FakeKV { m = new Map(); async get(k, t) { const v = this.m.get(k); return v === undefined ? null : t === "json" ? JSON.parse(v) : v; } async put(k, v) { this.m.set(k, v); } }
@@ -109,3 +109,45 @@ assert.deepEqual(out.options.map(o => [o.cls, o.quota, o.book_from, o.status]), 
   ["SL", "TQ", "SSM", "AVAILABLE-0072#"], ["3A", "GN", "PURI", "GNWL40/WL12"], ["SL", "GN", "SSM", "RLWL85/WL41"]]);
 assert.ok(out.options[0].score > out.options[1].score && out.options[1].score > out.options[2].score);
 console.log("live provider OK");
+
+/* ---------- flexible dates, connections, fallback, health (demo and fake upstream) ---------- */
+import { DemoProvider } from "../src/providers.js";
+import { FallbackProvider, connections, flexibleDates, healthCheck, pickHubs } from "../src/plans.js";
+{
+  const t0 = Date.parse("2026-11-18T09:00:00+05:30");
+  const demo = new DemoProvider(t0);
+  const days = await flexibleDates(demo, { origin: "SSM", dest: "NDLS", on: "2026-11-19" }, t0);
+  assert.deepEqual(days.map(d => [d.date, d.selected, d.trains, d.open]), [["2026-11-18", false, 2, 2], ["2026-11-19", true, 2, 2], ["2026-11-20", false, 2, 2], ["2026-11-21", false, 2, 2]]);
+  assert.equal(days[1].best.label, "WL 4");   // only the direct pair is used here: 1A PQWL5/WL4 at 45%
+  const todayOnly = await flexibleDates(demo, { origin: "SSM", dest: "NDLS", on: "2026-11-18" }, t0);
+  assert.equal(todayOnly[0].date, "2026-11-18", "never offers a past date");
+
+  assert.deepEqual(pickHubs([await demo.schedule("90001")], "SSM", "NDLS"), ["DDU", "PRYJ"]);
+  const c = await connections(demo, { origin: "SSM", dest: "NDLS", on: "2026-11-19" }, t0);
+  assert.deepEqual(c.hubs, ["DDU", "PRYJ"]);
+  assert.ok(c.connections.length > 0, "demo has a connection via DDU onto 90004");
+  const first = c.connections[0];
+  assert.equal(first.legs[1].train, "90004"); assert.equal(first.hub, "DDU");
+  assert.ok(first.gap >= 60 && first.gap <= 480, `gap ${first.gap}`);
+  assert.ok(c.connections.every(x => x.legs[0].train !== x.legs[1].train));
+  // leg 1 on 90002 leaves SSM 15:28, reaches DDU 17:15 (1:47), leg 2 leaves 19:30: gap 2 h 15 min
+  const via2 = c.connections.find(x => x.legs[0].train === "90002");
+  assert.equal(via2.gap, 135); assert.equal(via2.tight, false);
+
+  // fallback: primary fails, backup answers; budget errors are not treated as failures
+  const broken = { name: "x", calls: 0, trainsBetween: async () => { throw new ProviderError("down"); }, classStatuses: async () => { throw new ProviderError("down"); } };
+  let made = 0;
+  const fb = new FallbackProvider(broken, async () => { made++; return demo; });
+  assert.equal((await fb.trainsBetween("SSM", "NDLS", "2026-11-19")).length, 2);
+  assert.deepEqual(await fb.classStatuses("SSM", "NDLS", "2026-11-19"), {});
+  assert.equal(made, 1);
+  const none = new FallbackProvider(broken, async () => null);
+  await assert.rejects(none.trainsBetween("A", "B", "2026-11-19"), /no backup/);
+  const capped = new FallbackProvider({ name: "x", calls: 0, trainsBetween: async () => { throw new BudgetExceeded("cap"); } }, async () => { throw new Error("must not be called"); });
+  await assert.rejects(capped.trainsBetween("A", "B", "2026-11-19"), /cap/);
+
+  assert.deepEqual(await healthCheck(() => broken, t0), { ok: false, trains: 0, parsed_statuses: 0, problem: "down" });
+  const good = await healthCheck(() => ({ trainsBetween: demo.trainsBetween.bind(demo), classStatuses: demo.classStatuses.bind(demo) }), t0);
+  assert.equal(good.ok, false, "demo knows no NDLS-HWH trains, so this reads as unhealthy");
+  console.log("dates, connections, fallback, health OK");
+}

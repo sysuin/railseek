@@ -1,0 +1,21 @@
+# Checks every 6 hours that the live data source still answers in the expected shape.
+# A failed run makes GitHub email the repository owner.
+name: Data source health
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+permissions: {}
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call /api/health
+        run: |
+          status=$(curl -s -o body.json -w '%{http_code}' --retry 2 --retry-delay 20 https://railseek.divkrsh.com/api/health)
+          cat body.json; echo
+          if [ "$status" != "200" ]; then
+            echo "::error::Data source check failed (HTTP $status). Search results may be empty until the parser is fixed."
+            exit 1
+          fi

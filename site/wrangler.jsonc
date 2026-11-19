@@ -7,8 +7,8 @@
   "vars": {
     // "confirmtkt" (no key) or "irctc1" (RapidAPI key stored as the RAPIDAPI_KEY secret)
     "DATA_SOURCE": "confirmtkt",
-    // upstream requests the whole site may make per day (confirmtkt) or per month (irctc1)
-    "DAILY_CAP": "1500",
+    // upstream requests per day per Cloudflare location (confirmtkt), or per month in all (irctc1)
+    "DAILY_CAP": "3000",
     "MONTHLY_CAP": "10",
     // most upstream requests one check may spend
     "SEARCH_CAP": "8",
