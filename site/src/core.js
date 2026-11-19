@@ -27,8 +27,8 @@ const parts = ms => {
   const d = new Date(ms + IST_MIN * 60000);
   return { a: DOW[d.getUTCDay()], d: p2(d.getUTCDate()), b: MON[d.getUTCMonth()], Y: d.getUTCFullYear(), H: p2(d.getUTCHours()), M: p2(d.getUTCMinutes()) };
 };
-const fmt = (ms, f) => { const p = parts(ms); return f.replace(/%([adbYHM])/g, (_, k) => p[k]); };
-const fmtDay = (iso, f) => fmt(istAt(iso, 720), f);
+export const fmt = (ms, f) => { const p = parts(ms); return f.replace(/%([adbYHM])/g, (_, k) => p[k]); };
+export const fmtDay = (iso, f) => fmt(istAt(iso, 720), f);
 export const isoStamp = ms => { const p = new Date(ms + IST_MIN * 60000).toISOString(); return p.slice(0, 19) + "+05:30"; };
 
 /* ---------- status ---------- */

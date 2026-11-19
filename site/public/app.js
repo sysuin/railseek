@@ -113,6 +113,7 @@ async function init() {
   d.value = t.toISOString().slice(0, 10);
   try { const s = JSON.parse(localStorage.getItem("railseek.site") || "null"); if (s) { $("origin").value = s.origin || ""; $("dest").value = s.dest || ""; $("quota").value = s.quota || "GN"; $("pax").value = s.pax || "1"; } } catch (e) {}
   setMode(!meta.live_available);
+  loadAlerts();
   const day = n => { const x = new Date(meta.today + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
   $("quick-dates").replaceChildren(...[["Today", 0], ["Tomorrow", 1], ["Day after", 2]].map(([label, n]) =>
     h("button", { type: "button", class: "chip", onclick: () => { d.value = day(n); } }, label)));
@@ -271,6 +272,64 @@ async function findBest(d) {
     renderBest(all, done, numbers.length, failed);
     if (done >= numbers.length && !demo) keepLast(pickBest(all));
   }
+}
+
+/* ---------- alerts: browser notifications when a watched option changes ---------- */
+const pushReady = () => meta && meta.push_key && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
+function keyBytes(b64) {
+  const s = atob(b64.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - b64.length % 4) % 4));
+  return Uint8Array.from(s, c => c.charCodeAt(0));
+}
+async function pushSub(create) {
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (sub || !create) return sub;
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") throw new Error("Notifications are blocked for this site. Allow them in your browser's site settings to get alerts.");
+  return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(meta.push_key) });
+}
+function alertUnsupported() {
+  if (meta && !meta.push_key) return "Alerts are not available right now.";
+  if (isIOS() && !navigator.standalone) return "On iPhone, alerts work only from the installed app: tap Share, then Add to Home Screen, and open railseek from there.";
+  return "This browser cannot show notifications. Try Chrome, Edge, Firefox or Safari.";
+}
+async function addAlert(o, btn) {
+  if (demo) { btn.textContent = "Switch to live data for alerts"; return; }
+  if (!pushReady()) { banner("warn", alertUnsupported()); closeDrawer(); return; }
+  btn.disabled = true; btn.textContent = "Setting alert";
+  try {
+    const sub = await pushSub(true);
+    await post("/api/alerts/create", { subscription: sub.toJSON(), option: { train: o.train, train_name: o.train_name, cls: o.cls, quota: o.quota,
+      book_from: o.book_from, book_to: o.book_to, book_date: o.book_date, board: o.board, origin: journey.origin, dest: journey.dest } });
+    btn.textContent = "Alert set";
+    loadAlerts();
+  } catch (e) {
+    btn.disabled = false; btn.textContent = "Alert me";
+    banner("err", e.message || "Could not set the alert."); closeDrawer();
+  }
+}
+async function loadAlerts() {
+  if (!pushReady()) return;
+  let sub;
+  try { sub = await pushSub(false); } catch (e) { return; }
+  if (!sub) { $("alerts").replaceChildren(); return; }
+  let list = [];
+  try { list = (await post("/api/alerts/list", { endpoint: sub.endpoint })).alerts; } catch (e) { return; }
+  if (!list.length) { $("alerts").replaceChildren(); return; }
+  const when = ms => new Date(ms).toLocaleString(window.RS_LOCALE || "en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  $("alerts").replaceChildren(h("h2", { class: "h2" }, "Your alerts", h("small", {}, "checked about every 30 minutes; notifications come to this browser")),
+    h("div", { class: "card list" }, list.map(a => h("div", { class: "alertrow" },
+      h("span", {}, h("div", { class: "t1" }, `${a.train} ${a.train_name || ""}`.trim()),
+        h("div", { class: "t2" }, `${a.book_from} → ${a.book_to}  ·  ${shortDate(a.book_date)}  ·  ${a.cls}  ·  ${a.quota === "TQ" ? "Tatkal" : "General"}`),
+        h("div", { class: "t2" }, [a.tatkal_at ? `Tatkal reminder ${when(a.tatkal_at - 20 * 60000)}` : "", a.chart_at ? `chart reminder ${when(a.chart_at)}` : "", `ends ${when(a.expires)}`].filter(Boolean).join("  ·  "))),
+      h("span", { class: "c-status" }, a.label ? h("span", { class: "st " + (["closed", "waitlist", "rac", "available"][a.rank] || "closed") }, a.label) : null),
+      h("button", { type: "button", class: "btn ghost sm", onclick: async e => { e.currentTarget.disabled = true; await post("/api/alerts/delete", { endpoint: sub.endpoint, id: a.id }).catch(() => {}); loadAlerts(); } }, "Remove")))),
+    h("div", { class: "actions" }, h("button", { type: "button", class: "btn ghost sm", onclick: async e => {
+      const b = e.currentTarget; b.disabled = true;
+      try { const r = await post("/api/alerts/test", { endpoint: sub.endpoint }); b.textContent = r.result === "sent" ? "Test sent" : "Test could not be sent"; }
+      catch (err) { b.textContent = err.message; }
+    } }, "Send a test notification")));
 }
 
 /* ---------- sharing: the phone's share sheet, else WhatsApp ---------- */
@@ -443,6 +502,7 @@ function openDrawer(o, from) {
   body.push(h("h3", {}, "Be ready"), h("ul", { class: "plain ready" }, s.checklist.map(x => h("li", {}, h("label", {}, h("input", { type: "checkbox" }), h("span", {}, x))))));
   body.push(h("div", { class: "actions" }, h("a", { class: "btn", href: "https://www.irctc.co.in/nget/train-search", target: "_blank", rel: "noopener noreferrer" }, "Open IRCTC"),
     h("button", { class: "btn ghost", type: "button", onclick: e => share(shareText(o), location.href, e.currentTarget) }, "Share"),
+    h("button", { class: "btn ghost", type: "button", title: "Notify me when this changes, before Tatkal opens, and at chart time", onclick: e => addAlert(o, e.currentTarget) }, "Alert me"),
     h("button", { class: "btn ghost", type: "button", onclick: e => copySheet(o, e.currentTarget) }, "Copy details")));
   const tl = (last && last.timelines[o.train]) || timelines[o.train];
   if (tl) body.push(h("h3", {}, `Key moments, boarding at ${o.board}`), h("ul", { class: "tl" }, tl.map(e => h("li", { class: (e.passed ? "passed " : "") + (e.next ? "next" : "") },

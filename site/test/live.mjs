@@ -151,3 +151,37 @@ import { FallbackProvider, connections, flexibleDates, healthCheck, pickHubs } f
   assert.equal(good.ok, false, "demo knows no NDLS-HWH trains, so this reads as unhealthy");
   console.log("dates, connections, fallback, health OK");
 }
+
+/* ---------- alerts: change detection, push endpoint check, VAPID signature ---------- */
+import { describeChange } from "../src/alerts.js";
+import { validEndpoint, vapidAuth } from "../src/push.js";
+{
+  const a = { train: "04063", cls: "2A", quota: "GN", book_from: "SSM", book_to: "NDLS", book_date: "2026-11-21", rank: 1, label: "WL 12", wl: 12 };
+  const st = (level, label, count, chance = null) => [{ level, label, chance }, { count }];
+  assert.match(describeChange(a, ...st("available", "3 seats", 3)).title, /^Seats opened/);
+  assert.match(describeChange(a, ...st("rac", "RAC 4", 4)).title, /^Seats opened/);
+  assert.match(describeChange(a, ...st("waitlist", "WL 8", 8, 70)).title, /^Waitlist moving/);
+  assert.equal(describeChange(a, ...st("waitlist", "WL 10", 10)), null, "a small move is not worth a notification");
+  assert.equal(describeChange(a, ...st("waitlist", "WL 15", 15)), null);
+  assert.match(describeChange({ ...a, rank: 3, label: "2 seats", wl: null }, ...st("waitlist", "WL 1", 1)).title, /^Seats gone/);
+  assert.match(describeChange({ ...a, rank: 0, label: "Regret", wl: null }, ...st("waitlist", "WL 2", 2)).title, /^Booking opened/);
+
+  assert.ok(validEndpoint("https://fcm.googleapis.com/fcm/send/abc"));
+  assert.ok(validEndpoint("https://web.push.apple.com/QW1"));
+  assert.ok(validEndpoint("https://wns2-pn1p.notify.windows.com/w/?token=x"));
+  assert.ok(!validEndpoint("https://evil.example/fcm.googleapis.com/"));
+  assert.ok(!validEndpoint("http://127.0.0.1:9/x"));
+  assert.ok(validEndpoint("http://127.0.0.1:9/x", { ALLOW_TEST_PUSH: "1" }));
+
+  const { subtle } = globalThis.crypto;
+  const kp = await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const jwk = await subtle.exportKey("jwk", kp.privateKey);
+  const pub = Buffer.from(await subtle.exportKey("raw", kp.publicKey)).toString("base64url");
+  const auth = await vapidAuth("https://fcm.googleapis.com/fcm/send/abc", { VAPID_PRIVATE_JWK: JSON.stringify(jwk), VAPID_PUBLIC: pub }, Date.parse("2026-11-20T00:00:00Z"));
+  const [, t, k] = /^vapid t=([^,]+), k=(.+)$/.exec(auth);
+  assert.equal(k, pub);
+  const [h, c, s] = t.split(".");
+  assert.ok(await subtle.verify({ name: "ECDSA", hash: "SHA-256" }, kp.publicKey, Buffer.from(s, "base64url"), new TextEncoder().encode(`${h}.${c}`)));
+  assert.equal(JSON.parse(Buffer.from(c, "base64url")).aud, "https://fcm.googleapis.com");
+  console.log("alerts OK");
+}

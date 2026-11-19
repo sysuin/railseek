@@ -58,6 +58,9 @@
     "Nothing bookable on this train in this class": "इस ट्रेन की इस श्रेणी में कुछ भी बुक नहीं हो सकता",
     "Try another class or train, or look again after the first chart is prepared.": "दूसरी श्रेणी या ट्रेन आज़माएँ, या पहला चार्ट बनने के बाद फिर देखें।",
     "Looking at your station pair and others on the same train.": "आपका स्टेशन जोड़ा और उसी ट्रेन के दूसरे जोड़े देख रहे हैं।",
+    "Alert me": "सूचना दें", "Alert set": "सूचना लगा दी", "Setting alert": "सूचना लगा रहे हैं", "Your alerts": "आपकी सूचनाएँ", "Remove": "हटाएँ",
+    "checked about every 30 minutes; notifications come to this browser": "लगभग हर 30 मिनट में जाँच; सूचनाएँ इसी ब्राउज़र में आएँगी",
+    "Send a test notification": "परीक्षण सूचना भेजें", "Test sent": "परीक्षण भेज दिया", "Switch to live data for alerts": "सूचना के लिए लाइव डेटा चुनें",
   };
   const P = [
     [/^(\d+) seats?$/, "$1 सीट"], [/^(\d+) trains?$/, "$1 ट्रेनें"], [/^(\d+)% chance$/, "$1% संभावना"],
@@ -74,7 +77,7 @@
       (m, q) => `इस रास्ते की सभी ट्रेनें, आपके स्टेशनों के लिए ${q === "Tatkal" ? "तत्काल" : "सामान्य"} कोटे की स्थिति के साथ। उस ट्रेन के दूसरे स्टेशन जोड़े देखने के लिए श्रेणी पर टैप करें, रिग्रेट दिखे तब भी।`],
     [/(\d+) h (\d+) min/g, "$1 घं $2 मि"], [/(\d+) h\b/g, "$1 घं"], [/ wait\b/g, " इंतज़ार"], [/\(tight\)/g, "(कम समय)"], [/ in all\b/g, " कुल"],
     [/^from (.+) \((\w+)\), about (\d+) km away$/, "$1 ($2) से, लगभग $3 किमी दूर"], [/, straight-line distance$/, ", सीधी दूरी"],
-    [/^(\d+) checks/, "$1 जाँच"],
+    [/^(\d+) checks/, "$1 जाँच"], [/Tatkal reminder /g, "तत्काल याद "], [/chart reminder /g, "चार्ट याद "], [/\bends /g, "समाप्त "],
     [/^Fares are shown for (\d+) passengers\. On a waitlist, every passenger on one ticket has to confirm, so a large group confirms less often than one person\.$/,
       "किराया $1 यात्रियों का दिखाया गया है। प्रतीक्षा सूची में एक टिकट के सभी यात्रियों का कन्फर्म होना ज़रूरी है, इसलिए बड़े समूह का टिकट एक व्यक्ति की तुलना में कम कन्फर्म होता है।"],
     [/^A Tatkal ticket can carry at most 4 passengers\..*$/, "एक तत्काल टिकट पर अधिकतम 4 यात्री हो सकते हैं। बड़े समूह के लिए दो बुकिंग करनी होंगी, और बर्थ साथ में न मिलें, ऐसा हो सकता है।"],

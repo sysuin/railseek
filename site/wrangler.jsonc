@@ -4,6 +4,7 @@
   "pages_build_output_dir": "./dist",
   "compatibility_date": "2026-11-01",
   "kv_namespaces": [{ "binding": "KV", "id": "0c04b441a9694db28528453f52d42c5a" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "railseek", "database_id": "e65b2613-04e3-4797-a2c9-4307bf80f8c0", "migrations_dir": "migrations" }],
   "vars": {
     // "confirmtkt" (no key) or "irctc1" (RapidAPI key stored as the RAPIDAPI_KEY secret)
     "DATA_SOURCE": "confirmtkt",
@@ -13,6 +14,10 @@
     // most upstream requests one check may spend
     "SEARCH_CAP": "8",
     // live API calls one visitor may make per day (one search with its top-5 sweep is about 5)
-    "VISITOR_DAILY_LIVE": "300"
+    "VISITOR_DAILY_LIVE": "300",
+    // browser push: public half of the signing key (the private half is the VAPID_PRIVATE_JWK secret)
+    "VAPID_PUBLIC": "BHxArVQoj-o2hVHRfy00G60kZgm97wP8wog_IQiZSE_AcsfVpTprT8lBsWq0m_snuwkAdoTSnuRy0uKKSTAuLow",
+    // most alerts kept at once, for the whole site
+    "MAX_ALERTS": "500"
   }
 }

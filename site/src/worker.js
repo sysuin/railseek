@@ -5,6 +5,7 @@ import { ALL_CLASSES, ProviderError, addDays, brief, istToday, search, serialize
 import { ConfirmTktProvider, DemoProvider, LiveProvider, Quota } from "./providers.js";
 import { FallbackProvider, connections, flexibleDates, healthCheck, nearbyStarts, tatkalOpen } from "./plans.js";
 import { CacheStore } from "./store.js";
+import { AlertError, createAlert, deleteAlert, listAlerts, runAlerts, takeInbox, testAlert } from "./alerts.js";
 
 const CODE = /^[A-Z]{1,6}$/, TRAIN = /^[0-9A-Z]{3,6}$/, QUOTAS = ["GN", "TQ"];
 const TOP_BATCH = 3;
@@ -26,13 +27,12 @@ function journey(body, now) {
   return { origin, dest, on };
 }
 
-async function visitorAllowed(request, env, now) {
-  // counts live searches per visitor per day; the address is hashed and expires in a day
-  const limit = num(env, "VISITOR_DAILY_LIVE", 300);
+async function visitorAllowed(request, env, now, prefix = "v", limit = num(env, "VISITOR_DAILY_LIVE", 300)) {
+  // counts calls per visitor per day; the address is hashed and expires in a day
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
   const day = istToday(now);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${day}|${ip}|railseek`));
-  const key = "v:" + [...new Uint8Array(digest)].slice(0, 12).map(b => b.toString(16).padStart(2, "0")).join("");
+  const key = prefix + ":" + [...new Uint8Array(digest)].slice(0, 12).map(b => b.toString(16).padStart(2, "0")).join("");
   const store = CacheStore.open();   // not KV: free KV allows only 1,000 writes a day
   const used = +(await store.get(key) || 0);
   if (used >= limit) return false;
@@ -53,7 +53,11 @@ async function providerFor(request, env, body, now) {
   const quota = await loadQuota(env, now);
   if (body.demo) return { provider: new DemoProvider(now), quota, demo: true };
   if (!(await visitorAllowed(request, env, now))) throw new BadRequest("You have reached today's limit for live searches. Demo data still works.");
-  const perSearch = body.__perSearch || num(env, "SEARCH_CAP", 8);
+  return liveProvider(env, now, body.__perSearch || num(env, "SEARCH_CAP", 8), quota);
+}
+
+async function liveProvider(env, now, perSearch, quota) {
+  quota = quota || await loadQuota(env, now);
   const opts = { quota, perSearch, now, base: env.UPSTREAM_BASE };
   if (source(env) === "irctc1") return { provider: new LiveProvider({ ...opts, kv: env.KV, key: env.RAPIDAPI_KEY }), quota, demo: false };
   const primary = new ConfirmTktProvider({ ...opts, kv: CacheStore.open() });
@@ -75,7 +79,8 @@ async function api(request, env, ctx, path) {
   if (path === "/api/meta" && request.method === "GET") {
     const quota = await loadQuota(env, now);
     const today = istToday(now);
-    return json(200, { today, max_date: addDays(today, 62), classes: ALL_CLASSES, ...quotaInfo(env, quota) });
+    return json(200, { today, max_date: addDays(today, 62), classes: ALL_CLASSES, ...quotaInfo(env, quota),
+      push_key: env.DB && env.VAPID_PRIVATE_JWK ? env.VAPID_PUBLIC || "" : "" });
   }
   if (path === "/api/health" && request.method === "GET") {
     // checked at most every 10 minutes, so calling this often cannot load the data source
@@ -88,6 +93,7 @@ async function api(request, env, ctx, path) {
     }
     return json(result.ok ? 200 : 503, result);
   }
+  if (path.startsWith("/api/alerts/") && request.method === "POST") return alertsApi(request, env, ctx, path, now);
   if (request.method !== "POST" || !["/api/trains", "/api/check", "/api/top", "/api/dates", "/api/connections", "/api/nearby"].includes(path)) return json(404, { error: "Not found" });
   if (!(request.headers.get("Content-Type") || "").includes("application/json")) return json(415, { error: "JSON only" });
   const origin = request.headers.get("Origin");
@@ -137,6 +143,42 @@ async function api(request, env, ctx, path) {
   } finally {
     ctx.waitUntil(quota.save());
     if (provider.saveBackup) ctx.waitUntil(Promise.resolve(provider.saveBackup()));
+  }
+}
+
+async function readJson(request) {
+  if (!(request.headers.get("Content-Type") || "").includes("application/json")) return null;
+  try { const b = JSON.parse((await request.text()).slice(0, 6000)); return b && typeof b === "object" ? b : null; } catch (e) { return null; }
+}
+
+async function alertsApi(request, env, ctx, path, now) {
+  if (!env.DB || !env.VAPID_PUBLIC || !env.VAPID_PRIVATE_JWK) return json(503, { error: "Alerts are not set up on this site." });
+  const name = path.slice("/api/alerts/".length);
+  if (name === "run") {
+    // called by the timer Worker only
+    const key = request.headers.get("X-Run-Key") || "";
+    if (!env.RUN_KEY || key.length !== env.RUN_KEY.length || key !== env.RUN_KEY) return json(403, { error: "Forbidden" });
+    const { provider, quota } = await liveProvider(env, now, 12);
+    try { return json(200, await runAlerts(env, now, provider)); } finally { ctx.waitUntil(quota.save()); }
+  }
+  const origin = request.headers.get("Origin");
+  if (origin && origin !== new URL(request.url).origin) return json(403, { error: "Cross-site requests are not allowed" });
+  const body = await readJson(request);
+  if (!body) return json(400, { error: "Bad request" });
+  try {
+    if (name === "create") {
+      const { provider, quota } = await liveProvider(env, now, 3);
+      try { return json(200, { alert: await createAlert(env, body, now, provider, () => visitorAllowed(request, env, now, "alert", 20)) }); }
+      finally { ctx.waitUntil(quota.save()); }
+    }
+    if (name === "list") return json(200, { alerts: await listAlerts(env, body, now) });
+    if (name === "delete") return json(200, await deleteAlert(env, body));
+    if (name === "inbox") return json(200, { messages: await takeInbox(env, body) });
+    if (name === "test") return json(200, await testAlert(env, body, now, () => visitorAllowed(request, env, now, "ptest", 5)));
+    return json(404, { error: "Not found" });
+  } catch (e) {
+    if (e instanceof AlertError) return json(400, { error: e.message });
+    throw e;
   }
 }
 

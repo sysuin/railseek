@@ -1,0 +1,10 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "railseek-alerts-timer",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "vars": { "SITE": "https://railseek.divkrsh.com" },
+  "observability": { "enabled": true }
+}

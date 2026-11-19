@@ -66,8 +66,19 @@ cd site && npm run deploy
   monthly allowance lasts.
 - `/api/health` checks the data source (at most every 10 minutes). The GitHub Actions workflow in
   `.github/workflows/health.yml` calls it every 6 hours, so a broken source sends you an email.
-- No watching or alerts on the public site, and nothing is stored about visitors beyond a hashed,
-  one-day rate-limit counter.
+- Alerts: "Alert me" in a booking sheet watches that train, class, quota, station pair and date.
+  The browser gets a notification when the status improves (or seats disappear, or a waitlist moves
+  a lot), 20 minutes before Tatkal opens, and when the first chart is due. Alerts end when the train
+  leaves. How it works:
+  - Alerts live in a D1 database (`migrations/`), not KV, because of KV's write limit.
+  - Pushes carry no data (`src/push.js`, VAPID-signed); the service worker fetches its messages
+    from `/api/alerts/inbox`. Only known browser push services are accepted as endpoints.
+  - Pages cannot run on a timer, so `site/cron/` is a small Worker that calls `/api/alerts/run`
+    every 15 minutes with the `RUN_KEY` secret. Each alert is checked about every 30 minutes.
+  - Limits: 10 alerts per browser, 20 new alerts per visitor a day, 500 in all (`MAX_ALERTS`).
+  - Secrets: `VAPID_PRIVATE_JWK` and `RUN_KEY` on the Pages project, `RUN_KEY` on the timer Worker.
+    Deploy the timer with `npx wrangler deploy --config cron/wrangler.jsonc` from `site/`.
+  - On iPhone, notifications work only from the installed app (Add to Home Screen).
 - `npm run dev` in `site/` runs it locally on port 8787 (demo data unless `site/.dev.vars` has a key).
 
 ## Try it on made-up data
