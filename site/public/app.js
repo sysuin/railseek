@@ -230,17 +230,23 @@ function keep(o) {
   if (prefs.cls === "nonac" && AC.has(o.cls)) return false;
   return true;
 }
+// old figures rank a little lower: a waitlist saved two days ago may look very different now
+const ageH = o => (o.as_of && !demo ? (Date.now() - new Date(o.as_of).getTime()) / 3600000 : 0);
+const fresh = o => o.score - (ageH(o) > 24 ? 15 : ageH(o) > 12 ? 5 : 0);
 const SORTS = {
-  odds: (a, b) => b.score - a.score,
+  odds: (a, b) => fresh(b) - fresh(a),
   cheap: (a, b) => (a.fare ?? 1e9) - (b.fare ?? 1e9) || b.score - a.score,
   early: (a, b) => (mins(a.depart) ?? 1e4) - (mins(b.depart) ?? 1e4) || b.score - a.score,
 };
 function pickBest(all) {
-  // filtered, sorted, at most two per train so one train's classes do not fill the list
-  const seen = {}, out = [];
+  // filtered and sorted; one row per train and class (its best station pair), at most two per train
+  const seen = {}, pairs = new Set(), out = [];
   for (const o of all.filter(keep).sort(SORTS[prefs.sort] || SORTS.odds)) {
+    const k = `${o.train}|${o.cls}|${o.quota}`;
+    if (pairs.has(k)) continue;
     seen[o.train] = (seen[o.train] || 0) + 1;
-    if (seen[o.train] <= PER_TRAIN) out.push(o);
+    if (seen[o.train] > PER_TRAIN) continue;
+    pairs.add(k); out.push(o);
     if (out.length === TOP_N) break;
   }
   return out;
@@ -542,14 +548,32 @@ async function check(t, cls, btn) {
   }
 }
 
+// "GNWL10/WL2" -> "WL 2" with the waitlist type kept as a small note; "AVAILABLE-0014" -> "14 seats"
+function friendly(raw) {
+  const one = r => {
+    const s = String(r || "").toUpperCase();
+    let m;
+    if ((m = /(?:AVAILABLE|AVBL|AVL)\D{0,3}0*(\d+)/.exec(s))) return [`${+m[1]} seat${+m[1] === 1 ? "" : "s"}`, ""];
+    if ((m = /RAC\s*(\d+)(?:\s*\/\s*RAC\s*(\d+))?/.exec(s))) return [`RAC ${m[2] || m[1]}`, ""];
+    if ((m = /\b([A-Z]{0,2}WL)\s*(\d+)(?:\s*\/\s*[A-Z]*WL\s*(\d+))?/.exec(s)) && !s.includes("REGRET")) return [`WL ${m[3] || m[2]}`, m[1] !== "WL" ? m[1] : ""];
+    if (s.includes("REGRET")) return ["Regret", ""];
+    if (s.includes("NOT AVAILABLE")) return ["N/A", ""];
+    return [r, ""];
+  };
+  const parts = String(raw || "").split(" + ").map(one);
+  return [parts.map(p => p[0]).join(" + "), parts.map(p => p[1]).filter(Boolean).join(" + ")];
+}
+const STALE_MIN = 12 * 60;
+const isStale = stamp => stamp && !demo && (Date.now() - new Date(stamp).getTime()) / 60000 > STALE_MIN;
 function optRow(o, i, clickable) {
+  const [label, wlType] = friendly(o.status);
   const kids = [
     h("span", { class: "rank" }, clickable ? String(i + 1) : ""),
     h("span", {}, h("div", { class: "t1" }, `${o.train} ${o.train_name}`), h("div", { class: "t2" }, [KIND[o.kind] || o.kind, o.depart && o.arrive ? `${o.depart} → ${o.arrive}` : ""].filter(Boolean).join("  ·  "))),
-    h("span", { class: "c-book" }, h("div", { class: "pair" }, o.book_from, h("span", { class: "arrow" }, "→"), o.book_to),
+    h("span", { class: "c-book" }, h("div", { class: "pair", title: `${stName(o.book_from)} to ${stName(o.book_to)}` }, o.book_from, h("span", { class: "arrow" }, "→"), o.book_to),
       h("div", { class: "t2" }, `${shortDate(o.book_date)}  ·  ${o.cls}  ·  ${o.quota === "TQ" ? "Tatkal" : "General"}`)),
-    h("span", { class: "c-status" }, h("span", { class: "st " + o.level }, o.status),
-      h("div", { class: "t2" }, [o.chance !== null ? `${Math.round(o.chance)}% chance` : "", age(o.as_of)].filter(Boolean).join("  ·  "))),
+    h("span", { class: "c-status" }, h("span", { class: "st " + o.level, title: o.status }, label, wlType ? h("small", { class: "wlt" }, wlType) : null),
+      h("div", { class: "t2" + (isStale(o.as_of) ? " stale" : "") }, [o.chance !== null ? `${Math.round(o.chance)}% chance` : "", age(o.as_of), isStale(o.as_of) ? "may have changed" : ""].filter(Boolean).join("  ·  "))),
     h("span", { class: "fare" }, fareCell(o.fare)),
     h("span", { class: "chev", "aria-hidden": "true" }, clickable ? "›" : ""),
     clickable ? h("span", { class: "how" }, o.how) : null,
@@ -569,12 +593,28 @@ function renderResults(d, t, cls) {
 }
 
 /* ---------- drawer ---------- */
+async function copyValue(text, btn) {
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+    // older browsers and some in-app browsers: copy through a hidden text box
+    const ta = h("textarea", { "aria-hidden": "true", class: "offscreen" }); ta.value = text; document.body.append(ta); ta.select();
+    try { ok = document.execCommand("copy"); } catch (err) {} ta.remove();
+  }
+  if (ok) { btn.classList.add("done"); setTimeout(() => btn.classList.remove("done"), 1200); }
+}
+function sheetValue(f) {
+  // station fields gain the station's name; codes and numbers can be tapped to copy
+  const code = /^(From|To|Boarding)$/.test(f.label) ? f.value : f.label === "Train" ? f.value.split(" ")[0] : f.label === "Class" ? f.value : null;
+  const name = /^(From|To|Boarding)$/.test(f.label) && stName(f.value) !== f.value ? stName(f.value) : "";
+  const val = code ? h("button", { type: "button", class: "copyval", title: "Copy", "aria-label": `Copy ${code}`, onclick: e => copyValue(code, e.currentTarget) }, f.value) : f.value;
+  return [val, name ? h("span", { class: "stnname" }, ` ${name}`) : null];
+}
 function sheetBlock(s, title = "Enter these on IRCTC") {
   const key = new Set(["From", "To", "Date", "Boarding"]);
   return [
     h("h3", {}, title),
     h("dl", { class: "fields" }, s.fields.map(f => h("div", { class: key.has(f.label) && f.hint ? "key" : "" }, h("dt", {}, f.label),
-      h("dd", {}, f.value, f.hint ? h("small", {}, f.hint.replace(/^<-\s*/, "").replace(/^\((.*)\)$/, "$1")) : null)))),
+      h("dd", {}, ...sheetValue(f), f.hint ? h("small", {}, f.hint.replace(/^<-\s*/, "").replace(/^\((.*)\)$/, "$1")) : null)))),
     s.timing.length ? [h("h3", {}, "Timing"), h("ul", { class: "plain" }, s.timing.map(x => h("li", {}, x)))] : null,
     h("h3", {}, "Steps"), h("ol", {}, s.steps.map(x => h("li", {}, x))),
     h("h3", {}, "Before you pay"), h("ul", { class: "caution" }, s.cautions.map(x => h("li", {}, x))),

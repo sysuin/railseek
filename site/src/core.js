@@ -294,7 +294,8 @@ export function sheetData(c, stops, now) {
     const extra = [];
     if (c.avail.probability !== null && c.avail.kind === "WL") extra.push(`${Math.round(c.avail.probability)}% chance`);
     if (c.avail.fare !== null) extra.push(`about Rs ${Math.round(c.avail.fare)} per adult`);
-    const when = c.avail.fetched_at ? ` at ${c.avail.fetched_at.slice(11, 16)} on ${c.avail.fetched_at.slice(0, 10)}` : "";
+    const saved = c.avail.fetched_at ? Date.parse(c.avail.fetched_at) : NaN;
+    const when = Number.isFinite(saved) ? `, saved ${fmt(saved, "%d %b %H:%M")}` : "";
     fields.push(["Last seen", `${c.avail.raw || c.avail.kind}${when}` + (extra.length ? ` (${extra.join(", ")})` : ""), ""]);
   }
   const events = stops && travel ? buildTimeline(stops, c.board, travel, [c.cls]) || [] : [];

@@ -88,20 +88,33 @@ export const HUBS = new Set(("DDU PRYJ CNB LKO BSB BSBS PNBE GAYA ASN DHN HWH KO
   "R BSP DURG SBP JSG BKSC GMO HTE CPR SEE HJP DBG SPJ BGP JMP KIUL MKA BXR ARA DNR RJPB AY AYC FD BE BRY RMU FZR ASR " +
   "JUC BTI HSR REJ RE BKN JU AII UDZ BME").split(" "));
 
-export function pickHubs(stopsList, origin, dest, limit = 2) {
-  // hubs on the direct trains' routes, in the first 60% of the way, nearest your station first
+export function pickHubs(routes, origin, dest, limit = 2) {
+  // hubs on the direct trains' routes, in the first 60% of the way, nearest your station first.
+  // Each route is a train's stops, measured up to where that train meets your destination city
+  // (a search to NDLS often returns trains that end at ANVT or DLI).
   const seen = new Map();
-  for (const stops of stopsList) {
+  for (const r of routes) {
+    const stops = Array.isArray(r) ? r : r && r.stops, alight = Array.isArray(r) ? dest : (r && r.alight) || dest;
     if (!stops) continue;
     const i = stops.findIndex(s => s.code === origin);
-    const k = stops.findIndex((s, n) => n > i && s.code === dest);
+    const k = stops.findIndex((s, n) => n > i && (s.code === alight || s.code === dest));
     if (i < 0 || k < 0) continue;
     for (let n = i + 1; n < k; n++) {
       const code = stops[n].code, frac = (n - i) / (k - i);
       if (HUBS.has(code) && frac <= 0.6 && !seen.has(code)) seen.set(code, frac);
     }
   }
-  return [...seen.entries()].sort((a, b) => a[1] - b[1]).slice(0, limit).map(e => e[0]);
+  if (seen.size) return [...seen.entries()].sort((a, b) => a[1] - b[1]).slice(0, limit).map(e => e[0]);
+  // no usable route: junctions roughly on the way (at most 12% detour), about a third of the way first
+  const total = distanceKm(origin, dest);
+  if (!total) return [];
+  const onWay = [];
+  for (const code of HUBS) {
+    if (code === origin || code === dest) continue;
+    const a = distanceKm(origin, code), b = distanceKm(code, dest);
+    if (a !== null && b !== null && a >= Math.max(60, total * 0.12) && a <= total * 0.6 && a + b <= total * 1.12) onWay.push([code, Math.abs(a - total * 0.3)]);
+  }
+  return onWay.sort((x, y) => x[1] - y[1]).slice(0, limit).map(e => e[0]);
 }
 
 function leg(t, b, on, fromCode, toCode) {
@@ -115,8 +128,11 @@ export async function connections(provider, j, now, { maxHubs = 2, minGap = 60, 
   const direct = await provider.trainsBetween(j.origin, j.dest, j.on);
   const directNos = new Set(direct.map(t => t.number));
   const routes = [];
-  for (const t of direct.slice(0, 2)) {
-    try { routes.push(await provider.schedule(t.number)); } catch (e) { if (!(e instanceof ProviderError)) throw e; }
+  // routes of up to two direct trains, preferring regular trains (special trains run for a season)
+  const regularFirst = [...direct].sort((a, b) => (a.number[0] === "0") - (b.number[0] === "0"));
+  for (const t of regularFirst.slice(0, 4)) {
+    if (routes.length === 2) break;
+    try { routes.push({ stops: await provider.schedule(t.number), alight: t.alight }); } catch (e) { if (!(e instanceof ProviderError)) throw e; }
   }
   const hubs = pickHubs(routes, j.origin, j.dest, maxHubs);
   const found = [];

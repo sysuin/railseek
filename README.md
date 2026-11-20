@@ -71,6 +71,12 @@ cd site && npm run deploy
 - For journeys tomorrow, a banner counts down to Tatkal opening (10:00 AC, 11:00 non-AC) with a
   Tatkal checklist; for the day after, it notes that overnight trains open a day earlier.
 - Hindi now also covers the booking sheet, key moments and checklists (patterns in `public/i18n.js`).
+- Result rows show a plain status ("WL 2", "14 seats") with the waitlist type as a small note and
+  the raw code on hover. Figures saved more than 12 hours ago are marked "may have changed" and rank
+  a little lower. The best list shows one row per train and class.
+- In the booking sheet, station codes show their names, and codes and numbers can be tapped to copy.
+- "Change trains" measures each train's route to where it meets the destination city (a search to
+  NDLS often returns trains ending at ANVT or DLI), with a distance-based fallback for picking hubs.
 - Caches and politeness counters use Cloudflare's Cache API, because free KV allows only 1,000
   writes a day. Those counters are per Cloudflare location, so the caps are approximate. KV is kept
   for the strict RapidAPI allowance.
