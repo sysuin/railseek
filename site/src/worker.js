@@ -104,7 +104,7 @@ async function api(request, env, ctx, path) {
     if (!env.DB) return json(200, { points: [] });
     return json(200, { points: await readHistory(env.DB, { train: up("train"), book_from: up("book_from"), book_to: up("book_to"), book_date: b.book_date, cls: up("cls") }) });
   }
-  if (request.method !== "POST" || !["/api/trains", "/api/check", "/api/top", "/api/dates", "/api/connections", "/api/nearby"].includes(path)) return json(404, { error: "Not found" });
+  if (request.method !== "POST" || !["/api/trains", "/api/check", "/api/top", "/api/dates", "/api/connections", "/api/nearby", "/api/route"].includes(path)) return json(404, { error: "Not found" });
   if (!(request.headers.get("Content-Type") || "").includes("application/json")) return json(415, { error: "JSON only" });
   const origin = request.headers.get("Origin");
   if (origin && origin !== new URL(request.url).origin) return json(403, { error: "Cross-site requests are not allowed" });
@@ -112,6 +112,16 @@ async function api(request, env, ctx, path) {
   try { body = JSON.parse((await request.text()).slice(0, 4000)); } catch (e) { return json(400, { error: "Bad request" }); }
   if (!body || typeof body !== "object") return json(400, { error: "Bad request" });
 
+  if (path === "/api/route") {
+    const train = String(body.train || "").trim().toUpperCase();
+    if (!TRAIN.test(train)) return json(400, { error: "Bad train number." });
+    body.__perSearch = 2; body.__ctx = ctx;
+    const { provider, quota, demo } = await providerFor(request, env, body, now);
+    try {
+      if (!provider.trainInfo) return json(404, { error: "Route details are not available." });
+      return json(200, { demo, ...(await provider.trainInfo(train)) });
+    } finally { ctx.waitUntil(quota.save()); }
+  }
   const j = journey(body, now);
   body.__ctx = ctx;
   body.__perSearch = path === "/api/connections" || path === "/api/check" ? 10 : path === "/api/dates" || path === "/api/nearby" ? 6 : null;

@@ -77,6 +77,11 @@ cd site && npm run deploy
 - In the booking sheet, station codes show their names, and codes and numbers can be tapped to copy.
 - "Change trains" measures each train's route to where it meets the destination city (a search to
   NDLS often returns trains ending at ANVT or DLI), with a distance-based fallback for picking hubs.
+- Booking sheet extras: "Route and coaches" shows every stop with times, day, distance and expected
+  platform (your stations highlighted), the published coach order and ConfirmTkt user ratings
+  (`/api/route`, cached 7 days). "Add to calendar" downloads an .ics file with Tatkal opening, chart
+  time and departure, each with a reminder; it works on iPhone without notifications.
+- "Return trip" swaps the stations and moves the date two days on, ready to search.
 - Caches and politeness counters use Cloudflare's Cache API, because free KV allows only 1,000
   writes a day. Those counters are per Cloudflare location, so the caps are approximate. KV is kept
   for the strict RapidAPI allowance.

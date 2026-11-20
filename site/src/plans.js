@@ -24,6 +24,7 @@ export class FallbackProvider {
   }
   trainsBetween(...a) { return this.run("trainsBetween", a); }
   schedule(...a) { return this.run("schedule", a); }
+  trainInfo(...a) { return this.primary.trainInfo ? this.run("trainInfo", a) : this.run("schedule", a).then(stops => ({ stops, coaches: [], days: [] })); }
   availability(...a) { return this.run("availability", a); }
   async classStatuses(...a) {
     if (!this.down) { try { return await this.primary.classStatuses(...a); } catch (e) { if (!(e instanceof ProviderError) || e instanceof BudgetExceeded) throw e; this.down = true; } }

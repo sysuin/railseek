@@ -263,3 +263,14 @@ details.legend b { color: var(--text); }
   .opt > .how { grid-column: 2 / -1; grid-row: 4; }
   .opt .t1, .opt .t2, .leg .t1, .leg .t2, .near .t2 { white-space: normal; overflow: visible; text-overflow: clip; }
 }
+
+/* route view */
+ol.route { list-style: none; padding: 0; margin: 6px 0 0; border-left: 2px solid var(--border); }
+ol.route li { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 2px 10px; padding: 5px 0 5px 12px; margin: 0; position: relative; font-size: 13.5px; }
+ol.route li::before { content: ""; position: absolute; left: -6px; top: 11px; width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+ol.route li.trip::before { background: var(--accent); }
+ol.route li.mark { background: var(--accent-soft); border-radius: 6px; }
+ol.route .rt-time { font-variant-numeric: tabular-nums; color: var(--muted); }
+ol.route .rt-meta { grid-column: 2; font-size: 12px; color: var(--muted); }
+ol.route em { font-style: normal; font-weight: 700; color: var(--accent); font-size: 12px; }
+.coaches { font-variant-numeric: tabular-nums; font-size: 13px; overflow-wrap: anywhere; }

@@ -182,6 +182,7 @@ function renderTrains(d) {
   const box = [];
   box.push(h("div", { class: "summary" }, h("h2", {}, `${d.origin} → ${d.dest}`),
     h("button", { type: "button", class: "btn ghost sm", onclick: e => share(`Train options ${d.origin} to ${d.dest} on ${d.date}`, location.href, e.currentTarget) }, "Share search"),
+    h("button", { type: "button", class: "btn ghost sm", onclick: () => returnTrip() }, "Return trip"),
     h("span", { class: "meta" }, new Date(d.date + "T00:00:00").toLocaleDateString(window.RS_LOCALE || "en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })),
     h("span", { class: "meta" }, `${d.trains.length} train${d.trains.length === 1 ? "" : "s"}`)));
   if (d.demo) box.push(h("div", { class: "banner demo" }, "Demo data: these trains, timings and statuses are invented."));
@@ -629,11 +630,14 @@ function openDrawer(o, from) {
     ? [h("div", { class: "banner warn" }, `Two separate tickets on the same train. You may have to move to another berth at ${o.sheets[0].fields.find(f => f.label === "To").value}, and each ticket confirms on its own.`),
        ...o.sheets.map((sh, i) => sheetBlock(sh, `Ticket ${i + 1}: enter on IRCTC`))]
     : [sheetBlock(s)];
+  body.push(h("div", { id: "d-route" }));
   body.push(h("div", { id: "d-hist" }));
   body.push(h("h3", {}, "Be ready"), h("ul", { class: "plain ready" }, s.checklist.map(x => h("li", {}, h("label", {}, h("input", { type: "checkbox" }), h("span", {}, x))))));
   body.push(h("div", { class: "actions" }, h("a", { class: "btn", href: "https://www.irctc.co.in/nget/train-search", target: "_blank", rel: "noopener noreferrer" }, "Open IRCTC"),
     h("button", { class: "btn ghost", type: "button", onclick: e => share(shareText(o), location.href, e.currentTarget) }, "Share"),
     h("button", { class: "btn ghost", type: "button", title: "Notify me when this changes, before Tatkal opens, and at chart time", onclick: e => addAlert(o, e.currentTarget) }, "Alert me"),
+    ((last && last.timelines[o.train]) || timelines[o.train]) ? h("button", { class: "btn ghost", type: "button", title: "Tatkal opening, chart time and departure, with reminders", onclick: () => addToCalendar(o) }, "Add to calendar") : null,
+    h("button", { class: "btn ghost", type: "button", onclick: e => showRoute(o, e.currentTarget) }, "Route and coaches"),
     h("button", { class: "btn ghost", type: "button", onclick: e => copySheet(o, e.currentTarget) }, "Copy details")));
   const tl = (last && last.timelines[o.train]) || timelines[o.train];
   if (tl) body.push(h("h3", {}, `Key moments, boarding at ${o.board}`), h("ul", { class: "tl" }, tl.map(e => h("li", { class: (e.passed ? "passed " : "") + (e.next ? "next" : "") },
@@ -644,6 +648,66 @@ function openDrawer(o, from) {
   $("d-close").focus();
   const hist = $("d-hist"); if (hist) { hist.dataset.for = o.id; showHistory(o); }
 }
+/* ---------- the train's whole route, coach order and ratings ---------- */
+async function showRoute(o, btn) {
+  const box = $("d-route");
+  if (!box) return;
+  btn.disabled = true;
+  box.replaceChildren(h("h3", {}, "Route"), h("p", { class: "t2" }, "Loading the route…"));
+  let r;
+  try { r = await post("/api/route", { train: o.train, demo }); }
+  catch (e) { box.replaceChildren(h("h3", {}, "Route"), h("p", { class: "t2" }, e.message)); btn.disabled = false; return; }
+  const mark = { [o.book_from]: "book from", [o.board]: "you board", [o.alight]: "you get off", [o.book_to]: "book to" };
+  if (o.board === o.book_from) mark[o.board] = "you board";
+  if (o.alight === o.book_to) mark[o.alight] = "you get off";
+  const facts = [r.duration ? `${r.duration} h end to end` : "", r.days && r.days.length && r.days.length < 7 ? `runs ${r.days.join(", ")}` : r.days && r.days.length === 7 ? "runs daily" : "",
+    r.rating ? `rated ${r.rating}/5 by ConfirmTkt users (on time ${r.punctuality ?? "?"}, clean ${r.cleanliness ?? "?"}, food ${r.food ?? "?"})` : ""].filter(Boolean);
+  const inTrip = i => { const b = r.stops.findIndex(s => s.code === o.board), a = r.stops.findIndex(s => s.code === o.alight); return b >= 0 && a >= 0 && i >= b && i <= a; };
+  box.replaceChildren(...[h("h3", {}, `Route of ${o.train}`), facts.length ? h("p", { class: "t2" }, facts.join("  ·  ")) : null,
+    h("ol", { class: "route" }, r.stops.map((s, i) => h("li", { class: (mark[s.code] ? "mark " : "") + (inTrip(i) ? "trip" : "") },
+      h("span", { class: "rt-time" }, s.arr || "start", s.dep && s.arr ? h("small", {}, ` / ${s.dep}`) : !s.arr ? h("small", {}, ` ${s.dep}`) : null),
+      h("span", { class: "rt-stn" }, h("b", {}, s.code), ` ${s.name}`, mark[s.code] ? h("em", {}, `  ${mark[s.code]}`) : null),
+      h("span", { class: "rt-meta" }, [`day ${s.day}`, s.km !== null && s.km !== undefined ? `${s.km} km` : "", s.platform ? `pf ${s.platform}` : ""].filter(Boolean).join(" · "))))),
+    ...(r.coaches && r.coaches.length ? [h("h3", {}, "Coach order"), h("p", { class: "coaches" }, r.coaches.join("  ·  ")),
+      h("p", { class: "t2" }, "From the engine end, as published. It can change on the day, so check the coach position board at the station.")] : [])].filter(Boolean));
+  btn.textContent = "Route shown below";
+}
+
+/* ---------- calendar file with the key moments ---------- */
+function addToCalendar(o) {
+  const tl = (last && last.timelines[o.train]) || timelines[o.train] || [];
+  const ac = AC.has(o.cls), now = Date.now();
+  const wanted = e => /^Train leaves|First chart/.test(e.label) || (/^Tatkal opens/.test(e.label) && (ac ? /for AC/.test(e.label) : /non-AC/.test(e.label)));
+  const events = tl.filter(e => e.at && e.at > now && wanted(e));
+  if (!events.length) { banner("warn", "All of this train's key moments have already passed."); closeDrawer(); return; }
+  const z = ms => new Date(ms).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  const esc = t => String(t).replace(/\\/g, "\\\\").replace(/([,;])/g, "\\$1").replace(/\n/g, "\\n");   // RFC 5545 text escaping
+  const what = `${o.train} ${o.train_name}, ${o.cls}, ${o.book_from} to ${o.book_to}`;
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//railseek//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH"];
+  events.forEach((e, i) => {
+    const lead = /^Tatkal/.test(e.label) ? 15 : /^Train leaves/.test(e.label) ? 120 : 0;
+    lines.push("BEGIN:VEVENT", `UID:${o.train}-${o.book_date}-${i}-${now}@railseek.divkrsh.com`, `DTSTAMP:${z(now)}`, `DTSTART:${z(e.at)}`, `DTEND:${z(e.at + 15 * 60000)}`,
+      `SUMMARY:${esc(`${e.label}: ${o.train}`)}`, `DESCRIPTION:${esc(`${what}. ${e.note || ""} Check on IRCTC. ${location.origin}${location.pathname}${location.search}`)}`,
+      "BEGIN:VALARM", "ACTION:DISPLAY", `DESCRIPTION:${esc(e.label)}`, `TRIGGER:-PT${lead}M`, "END:VALARM", "END:VEVENT");
+  });
+  lines.push("END:VCALENDAR");
+  const url = URL.createObjectURL(new Blob([lines.join("\r\n") + "\r\n"], { type: "text/calendar" }));
+  const a = h("a", { href: url, download: `railseek-${o.train}-${o.book_date}.ics` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+/* ---------- return trip: swap the stations and pick a later date ---------- */
+function returnTrip() {
+  const a = $("origin").value; $("origin").value = $("dest").value; $("dest").value = a; showName("origin"); showName("dest");
+  const d = new Date((journey ? journey.date : meta.today) + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 2);
+  const iso = d.toISOString().slice(0, 10);
+  if (!meta.max_date || iso <= meta.max_date) $("date").value = iso;
+  window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  $("banners").replaceChildren(h("div", { class: "banner warn", role: "status" }, "Stations swapped for the return trip. Pick the return date, then press Find trains."));
+  $("date").focus();
+}
+
 // how this option's status has moved, from figures saved during earlier searches
 async function showHistory(o) {
   if (demo || o.quota !== "GN") return;

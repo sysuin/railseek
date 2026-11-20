@@ -380,7 +380,7 @@ export function serialize(result, req, demo, now) {
     const events = buildTimeline(stops, hit.board, req.on, req.classes.length ? req.classes : hit.classes);
     if (!events) continue;
     const nxt = events.find(e => e.when >= now);
-    timelines[hit.number] = events.map(e => ({ when: fmt(e.when, "%a %d %b, %H:%M"), relative: relative(e.when, now), passed: e.when < now, next: e === nxt, label: e.label, note: e.note }));
+    timelines[hit.number] = events.map(e => ({ at: e.when, when: fmt(e.when, "%a %d %b, %H:%M"), relative: relative(e.when, now), passed: e.when < now, next: e === nxt, label: e.label, note: e.note }));
   }
   const stamps = result.options.flatMap(o => o.legs.map(l => l.avail.fetched_at)).filter(Boolean).sort();
   return {

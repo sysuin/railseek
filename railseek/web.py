@@ -133,6 +133,7 @@ def serialize(result: SearchResult, req: SearchRequest, provider, now: datetime 
         nxt = next((e for e in events if e.when >= now), None)
         timelines[hit.number] = [
             {
+                "at": int(e.when.timestamp() * 1000),
                 "when": e.when.strftime("%a %d %b, %H:%M"),
                 "relative": relative(e.when, now),
                 "passed": e.when < now,

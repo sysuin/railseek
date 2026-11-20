@@ -48,6 +48,10 @@ export class DemoProvider {
     }
     return out;
   }
+  async trainInfo(trainNo) {
+    const stops = (await this.schedule(trainNo)).map((s, i, all) => ({ ...s, arr: i ? ROUTES[trainNo][2][i][3] : "", dep: i < all.length - 1 ? ROUTES[trainNo][2][i][3] : "", halt: "", km: null, platform: "" }));
+    return { number: trainNo, name: ROUTES[trainNo][0], stops, coaches: [], days: [], duration: "", rating: null, punctuality: null, cleanliness: null, food: null };
+  }
   async schedule(trainNo) {
     if (!ROUTES[trainNo]) throw new ProviderError(`unknown demo train ${trainNo}`);
     return ROUTES[trainNo][2].map(([code, name, day, t], seq) => ({ code, name, seq, day, dep_min: +t.slice(0, 2) * 60 + +t.slice(3) }));
@@ -278,8 +282,9 @@ export class ConfirmTktProvider {
     const each = map => Object.fromEntries(Object.entries(map).map(([cls, e]) => [cls, ctEntry(e, on)]));
     return Object.fromEntries((await this.pair(frm, to, on)).map(r => [r.number, { GN: each(r.gn), TQ: each(r.tq) }]));
   }
-  async schedule(trainNo) {
-    const key = `c:cs:${trainNo}`;
+  // the whole route with times, halts and distances, plus the coach order and user ratings
+  async trainInfo(trainNo) {
+    const key = `c:ti:${trainNo}`;
     const hit = await this.kv.get(key, "json");
     if (hit) return hit;
     const data = await this.get("/schedule", { trainNo });
@@ -289,12 +294,25 @@ export class ConfirmTktProvider {
     for (const r of rows) {
       const code = String(r.StationCode || "").toUpperCase();
       if (!code) continue;
-      let dep = hhmm(r.DepartureTime); if (dep === null) dep = hhmm(r.ArrivalTime);
-      stops.push({ code, name: titleCase(r.StationName || code), seq: stops.length, day: parseInt(r.Day, 10) || 1, dep_min: dep });
+      const arr = hhmm(r.ArrivalTime), dep0 = hhmm(r.DepartureTime);
+      stops.push({ code, name: titleCase(r.StationName || code), seq: stops.length, day: parseInt(r.Day, 10) || 1, dep_min: dep0 ?? arr,
+        arr: arr === null ? "" : String(r.ArrivalTime).slice(0, 5), dep: dep0 === null ? "" : String(r.DepartureTime).slice(0, 5),
+        halt: String(r.HaltMinutes || ""), km: Math.round(parseFloat(r.Distance) || 0), platform: String(r.ExpectedPlatformNo || "") });
     }
     if (stops.length < 2) throw new ProviderError(`schedule for ${trainNo} has fewer than two stops`);
-    await this.kv.put(key, JSON.stringify(stops), { expirationTtl: TTL.schedule });
-    return stops;
+    const LABEL = { EN: "Engine", GS: "General", PC: "Pantry", SLR: "Guard/luggage", EOG: "Power car" };
+    const coaches = String(data.CoachPosition || "").split(",").map(t => t.trim()).filter(Boolean).map(t => {
+      const [pre, suf] = t.split(":"); return suf || LABEL[String(pre).toUpperCase()] || "";
+    }).filter(Boolean);
+    const days = data.DaysOfRun && typeof data.DaysOfRun === "object" ? Object.entries(data.DaysOfRun).filter(([, v]) => v).map(([d]) => d) : [];
+    const num = v => (typeof v === "number" && v > 0 ? Math.round(v * 10) / 10 : null);
+    const info = { number: String(trainNo), name: titleCase(data.TrainName || ""), stops, coaches: coaches.length > 3 ? coaches : [], days,
+      duration: String(data.TotalDuration || ""), rating: num(data.Rating), punctuality: num(data.PunctualityRating), cleanliness: num(data.CleanlinessRating), food: num(data.FoodRating) };
+    await this.kv.put(key, JSON.stringify(info), { expirationTtl: TTL.schedule });
+    return info;
+  }
+  async schedule(trainNo) {
+    return (await this.trainInfo(trainNo)).stops;
   }
   async availability(trainNo, frm, to, on, cls, quota) {
     const field = CT_FIELD[quota];
