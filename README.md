@@ -66,6 +66,11 @@ cd site && npm run deploy
   has moved. Rows are removed the day after the journey.
 - Cloudflare Web Analytics (cookie-free) is enabled on the Pages project; the security policy in
   `public/_headers` allows its beacon.
+- Best options can be sorted (best chance, cheapest, leaves earliest) and filtered by departure time
+  and AC or non-AC; the choice is remembered on the device. Recent routes appear as shortcuts.
+- For journeys tomorrow, a banner counts down to Tatkal opening (10:00 AC, 11:00 non-AC) with a
+  Tatkal checklist; for the day after, it notes that overnight trains open a day earlier.
+- Hindi now also covers the booking sheet, key moments and checklists (patterns in `public/i18n.js`).
 - Caches and politeness counters use Cloudflare's Cache API, because free KV allows only 1,000
   writes a day. Those counters are per Cloudflare location, so the caps are approximate. KV is kept
   for the strict RapidAPI allowance.

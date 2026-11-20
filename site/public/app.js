@@ -118,6 +118,7 @@ async function init() {
   $("quick-dates").replaceChildren(...[["Today", 0], ["Tomorrow", 1], ["Day after", 2]].map(([label, n]) =>
     h("button", { type: "button", class: "chip", onclick: () => { d.value = day(n); } }, label)));
   attachSuggest("origin"); attachSuggest("dest");
+  renderRecent();
   const stationsReady = loadStations();
   // a shared link fills the form and runs the search
   const p = new URLSearchParams(location.search), code = /^[A-Za-z]{1,6}$/;
@@ -165,6 +166,8 @@ $("form").addEventListener("submit", async e => {
     lastTrains = data;
     try { history.replaceState(null, "", "?" + new URLSearchParams({ from, to, date: journey.date, quota: journey.quota })); } catch (e) {}
     renderTrains(data);
+    rememberSearch(journey);
+    tatkalBanner();
     findBest(data).then(() => { if (id === searchId) findConnections(id); });
     findDates(id);
     findNearby(id);
@@ -212,25 +215,108 @@ function renderTrains(d) {
 
 /* ---------- best options: sweep every train in small batches, keep the top 5 ---------- */
 const TOP_N = 5, BATCH = 3, PER_TRAIN = 2;
+// Sort and filter for the best options, remembered on this device
+const prefs = (() => { try { return { sort: "odds", time: "any", cls: "all", ...JSON.parse(localStorage.getItem("railseek.prefs") || "{}") }; } catch (e) { return { sort: "odds", time: "any", cls: "all" }; } })();
+const AC = new Set(["1A", "2A", "3A", "3E", "CC", "EC", "EA"]);
+const mins = t => { const m = /^(\d{1,2}):(\d{2})/.exec(t || ""); return m ? +m[1] * 60 + +m[2] : null; };
+function keep(o) {
+  const t = mins(o.depart);
+  if (prefs.time !== "any" && t !== null) {
+    if (prefs.time === "morning" && !(t >= 240 && t < 720)) return false;
+    if (prefs.time === "day" && !(t >= 720 && t < 1020)) return false;
+    if (prefs.time === "night" && !(t >= 1020 || t < 240)) return false;
+  }
+  if (prefs.cls === "ac" && !AC.has(o.cls)) return false;
+  if (prefs.cls === "nonac" && AC.has(o.cls)) return false;
+  return true;
+}
+const SORTS = {
+  odds: (a, b) => b.score - a.score,
+  cheap: (a, b) => (a.fare ?? 1e9) - (b.fare ?? 1e9) || b.score - a.score,
+  early: (a, b) => (mins(a.depart) ?? 1e4) - (mins(b.depart) ?? 1e4) || b.score - a.score,
+};
 function pickBest(all) {
-  // best first, at most two per train so one train's classes do not fill the list
+  // filtered, sorted, at most two per train so one train's classes do not fill the list
   const seen = {}, out = [];
-  for (const o of [...all].sort((a, b) => b.score - a.score)) {
+  for (const o of all.filter(keep).sort(SORTS[prefs.sort] || SORTS.odds)) {
     seen[o.train] = (seen[o.train] || 0) + 1;
     if (seen[o.train] <= PER_TRAIN) out.push(o);
     if (out.length === TOP_N) break;
   }
   return out;
 }
+let bestState = null;
+function bestControls() {
+  const sel = (key, label, opts) => h("label", { class: "ctl" }, label, h("select", { "aria-label": label, onchange: e => {
+    prefs[key] = e.target.value; try { localStorage.setItem("railseek.prefs", JSON.stringify(prefs)); } catch (err) {}
+    if (bestState) renderBest(...bestState);
+  } }, opts.map(([v, t]) => h("option", { value: v, selected: prefs[key] === v || null }, t))));
+  return h("div", { class: "ctls" },
+    sel("sort", "Sort", [["odds", "Best chance"], ["cheap", "Cheapest"], ["early", "Leaves earliest"]]),
+    sel("time", "Leaves", [["any", "Any time"], ["morning", "Morning (4 am to noon)"], ["day", "Afternoon (noon to 5 pm)"], ["night", "Evening and night"]]),
+    sel("cls", "Class", [["all", "All classes"], ["ac", "AC only"], ["nonac", "Sleeper and seats"]]));
+}
 function renderBest(all, done, total, failed) {
+  bestState = [all, done, total, failed];
   const top = pickBest(all), working = done < total;
+  const filtered = prefs.time !== "any" || prefs.cls !== "all";
   const status = working ? `checking trains, ${done} of ${total} done` : failed ? "some trains could not be checked" : `from ${total} train${total === 1 ? "" : "s"}, all classes, ${journey.date <= tomorrowIso() ? "general and Tatkal" : "general quota (Tatkal opens the day before travel)"}`;
-  const kids = [h("h2", { class: "h2" }, "Best options", h("small", { role: "status" }, working ? h("span", { class: "spin inline" }) : null, status))];
+  const kids = [h("h2", { class: "h2" }, "Best options", h("small", { role: "status" }, working ? h("span", { class: "spin inline" }) : null, status)), bestControls()];
   if (top.length) kids.push(h("div", { class: "card list" }, top.map((o, i) => optRow(o, i, true))));
+  else if (!working && filtered && all.some(o => o.score > 0)) kids.push(h("div", { class: "card empty" }, h("h3", {}, "Nothing matches these filters"), h("div", {}, "There are bookable options at other times or in other classes. Change the filters above.")));
   else if (!working) kids.push(h("div", { class: "card empty" }, h("h3", {}, "Nothing bookable right now"), h("div", {}, "Every class on every train is closed for this date. Try another date, or look again after the first chart is prepared.")));
   else kids.push(h("div", { class: "card empty" }, h("div", {}, "Looking through every train and class.")));
   $("best").replaceChildren(...kids);
 }
+
+/* ---------- recent searches, kept on this device ---------- */
+function recentList() { try { return JSON.parse(localStorage.getItem("railseek.recent") || "[]"); } catch (e) { return []; } }
+function rememberSearch(j) {
+  const list = [{ from: j.origin, to: j.dest, quota: j.quota }, ...recentList().filter(r => !(r.from === j.origin && r.to === j.dest))].slice(0, 5);
+  try { localStorage.setItem("railseek.recent", JSON.stringify(list)); } catch (e) {}
+  renderRecent();
+}
+function renderRecent() {
+  const list = recentList();
+  $("recent-row").hidden = !list.length;
+  $("recent").replaceChildren(...list.map(r => h("button", { type: "button", class: "chip", title: `Search ${r.from} to ${r.to} again`, onclick: () => {
+    $("origin").value = r.from; $("dest").value = r.to; $("quota").value = r.quota || "GN"; showName("origin"); showName("dest"); $("form").requestSubmit();
+  } }, `${r.from} → ${r.to}`)));
+}
+
+/* ---------- Tatkal countdown for journeys tomorrow ---------- */
+const TATKAL_LIST = [
+  "Your IRCTC account is Aadhaar-authenticated (My Profile > Authenticate User). Tatkal is refused without it.",
+  "The phone linked to your Aadhaar is next to you and has signal, for the booking OTP.",
+  "Log in 3 to 5 minutes before opening time. Earlier risks a session timeout; later risks the login queue.",
+  "At most 4 passengers per Tatkal booking. A confirmed Tatkal ticket cannot be refunded.",
+  "Passengers are saved in My Profile > Master List, with names and ages exactly as on their ID.",
+  "Payment is ready: IRCTC eWallet topped up, or a UPI app open on your phone. Avoid cards that need a slow bank OTP.",
+];
+function tatkalBanner() {
+  const nowIst = new Date(Date.now() + 330 * 60000), today = nowIst.toISOString().slice(0, 10), m = nowIst.getUTCHours() * 60 + nowIst.getUTCMinutes();
+  const plus = n => { const x = new Date(today + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const left = t => { const d = t - m; return d >= 60 ? `in ${Math.floor(d / 60)} h ${d % 60} min` : `in ${d} min`; };
+  let text = "";
+  if (journey.date === plus(1)) {
+    if (m < 600) text = `Tatkal for tomorrow opens today: 10:00 for AC (${left(600)}), 11:00 for sleeper and seats (${left(660)}).`;
+    else if (m < 660) text = `Tatkal for AC classes opened at 10:00. Sleeper and seats open at 11:00 (${left(660)}).`;
+    else text = "Tatkal for tomorrow opened this morning. Tatkal seats often sell out within minutes, but cancellations reappear.";
+  } else if (journey.date === plus(2)) {
+    text = "Trains that start their run the day before they reach you open Tatkal a day earlier, so for some trains it opens today. Each train's key moments are in its booking sheet.";
+  }
+  if (!text) return;
+  $("banners").append(h("div", { class: "banner tatkal", role: "status" }, h("span", {}, text),
+    h("button", { type: "button", class: "btn ghost sm", onclick: () => openChecklist() }, "Tatkal checklist")));
+}
+function openChecklist() {
+  lastFocus = document.activeElement;
+  $("d-title").textContent = "Tatkal checklist"; $("d-sub").textContent = "Get these ready before opening time";
+  $("d-body").replaceChildren(h("h3", {}, "Be ready"), h("ul", { class: "plain ready" }, TATKAL_LIST.map(x => h("li", {}, h("label", {}, h("input", { type: "checkbox" }), h("span", {}, x))))),
+    h("div", { class: "actions" }, h("a", { class: "btn", href: "https://www.irctc.co.in/nget/train-search", target: "_blank", rel: "noopener noreferrer" }, "Open IRCTC")));
+  $("drawer").classList.add("on"); $("scrim").classList.add("on"); $("drawer").setAttribute("aria-hidden", "false"); $("d-close").focus();
+}
+
 /* ---------- offline: keep the last search to show without a connection ---------- */
 function keepLast(best) {
   try { localStorage.setItem("railseek.last", JSON.stringify({ journey, trains: lastTrains, best, saved: Date.now() })); } catch (e) {}

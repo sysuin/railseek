@@ -29,7 +29,6 @@
 
 ## Backlog
 
-- [ ] Hindi for the booking-sheet sentences written by the server (the page's own wording is done).
 - [ ] Alerts by Telegram, for people who do not want browser notifications (needs a bot created
   from your Telegram account).
 - [ ] Nearby dates, connections and nearby stations in the local command-line tool (site only today).
