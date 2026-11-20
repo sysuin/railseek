@@ -274,3 +274,22 @@ ol.route .rt-time { font-variant-numeric: tabular-nums; color: var(--muted); }
 ol.route .rt-meta { grid-column: 2; font-size: 12px; color: var(--muted); }
 ol.route em { font-style: normal; font-weight: 700; color: var(--accent); font-size: 12px; }
 .coaches { font-variant-numeric: tabular-nums; font-size: 13px; overflow-wrap: anywhere; }
+
+/* the plan card and verdicts */
+.plan { padding: 16px 18px; margin-top: 18px; border-left: 4px solid var(--accent); }
+.plan.tone-ok { border-left-color: var(--ok); }
+.plan.tone-rac { border-left-color: var(--rac); }
+.plan.tone-low { border-left-color: var(--closed); }
+.plan-kicker { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.plan-kicker .t2 { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.plan-title { margin: 6px 0 4px; font-size: 18px; letter-spacing: -.01em; }
+.plan-text { margin: 0; color: var(--text); }
+.plan .actions { margin-top: 12px; }
+.plan-tips { margin: 14px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border); list-style: none; display: grid; gap: 8px; }
+.plan-tips li { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; font-size: 14px; color: var(--muted); }
+.plan-tips li::before { content: "•"; color: var(--accent); font-weight: 700; }
+.plan-tips li > span { flex: 1; }
+.verdict { display: block; font-size: 12px; font-weight: 700; margin-top: 3px; }
+.verdict.v-ok { color: var(--ok); } .verdict.v-rac { color: var(--rac); } .verdict.v-wl { color: var(--wl); } .verdict.v-low { color: var(--closed); }
+@media (max-width: 860px) { .opt > .c-status .verdict { margin-top: 0; } .plan-tips li { flex-direction: column; } .plan-tips li::before { display: none; } }
+.plan-alt { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; margin-top: 12px; padding: 10px 12px; background: var(--surface-2); border-radius: 8px; font-size: 14px; }

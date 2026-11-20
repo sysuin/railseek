@@ -1,6 +1,6 @@
 // Offline support: keeps the page itself available without a connection. Search data is
 // never cached here; the page keeps your last search in local storage instead.
-const VERSION = "railseek-v9";
+const VERSION = "railseek-v12";
 const ASSETS = ["/", "/app.js", "/app.css", "/i18n.js", "/stations.json", "/manifest.webmanifest", "/icon-192.png"];
 
 self.addEventListener("install", e => {

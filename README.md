@@ -82,6 +82,14 @@ cd site && npm run deploy
   (`/api/route`, cached 7 days). "Add to calendar" downloads an .ics file with Tatkal opening, chart
   time and departure, each with a reminder; it works on iPhone without notifications.
 - "Return trip" swaps the stations and moves the date two days on, ready to search.
+- A "What to do" card at the top turns all the sections into one next step, in this order:
+  confirmed seats on one train, RAC, two trains that both have seats, seats from a nearby station,
+  a waitlist likely to confirm (70% or more), seats on a nearby date, and otherwise the best moves
+  left. When the top pick needs extra effort, a likely one-train waitlist is shown beside it. Tips
+  cover Tatkal opening, chart time for the waitlist it points at, and setting an alert.
+- Every option carries a plain verdict: confirmed seats, RAC, likely / may / unlikely to confirm.
+- Sections run from the decision down: plan, best options, nearby stations, change trains, nearby
+  dates, then all trains.
 - Caches and politeness counters use Cloudflare's Cache API, because free KV allows only 1,000
   writes a day. Those counters are per Cloudflare location, so the caps are approximate. KV is kept
   for the strict RapidAPI allowance.

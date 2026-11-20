@@ -157,7 +157,8 @@ $("form").addEventListener("submit", async e => {
   $("origin").value = from; $("dest").value = to; showName("origin"); showName("dest");
   busy = true; save();
   const go = $("go"); go.disabled = true; go.replaceChildren(h("span", { class: "spin" }), "Finding");
-  const id = ++searchId; for (const s of ["best", "dates", "conn", "nearby"]) $(s).replaceChildren();
+  const id = ++searchId; for (const s of ["best", "dates", "conn", "nearby", "plan"]) $(s).replaceChildren();
+  plan = { id, best: [], bestDone: false, conn: null, nearby: null, dates: null };
   journey = { origin: from, dest: to, date: $("date").value, quota: $("quota").value, demo };
   try {
     const data = await post("/api/trains", journey);
@@ -166,8 +167,7 @@ $("form").addEventListener("submit", async e => {
     lastTrains = data;
     try { history.replaceState(null, "", "?" + new URLSearchParams({ from, to, date: journey.date, quota: journey.quota })); } catch (e) {}
     renderTrains(data);
-    rememberSearch(journey);
-    tatkalBanner();
+    rememberSearch(journey);   // Tatkal timing now appears in the plan card
     findBest(data).then(() => { if (id === searchId) findConnections(id); });
     findDates(id);
     findNearby(id);
@@ -345,7 +345,7 @@ async function findBest(d) {
   timelines = {};
   $("best").replaceChildren();
   const numbers = d.trains.map(t => t.number);
-  if (!numbers.length) return;
+  if (!numbers.length) { plan.bestDone = true; renderPlan(); return; }
   let done = 0, failed = false;
   renderBest(all, 0, numbers.length, false);
   for (let i = 0; i < numbers.length; i += BATCH) {
@@ -363,8 +363,86 @@ async function findBest(d) {
     }
     done += batch.length;
     renderBest(all, done, numbers.length, failed);
+    if (plan.id === id) { plan.best = all; plan.bestDone = done >= numbers.length; renderPlan(); }
     if (done >= numbers.length && !demo) keepLast(pickBest(all));
   }
+}
+
+/* ---------- the plan: one clear next step, drawn from every section ---------- */
+let plan = { id: 0, best: [], bestDone: false, conn: null, nearby: null, dates: null };
+// plain verdict for an option or leg: what the status means for actually travelling
+function verdict(level, chance) {
+  if (level === "available") return { text: "Confirmed seats", cls: "ok" };
+  if (level === "rac") return { text: "RAC: you can travel", cls: "rac" };
+  if (level === "waitlist") {
+    if (chance === null || chance === undefined) return { text: "Chance unknown", cls: "wl" };
+    if (chance >= 70) return { text: "Likely to confirm", cls: "wl" };
+    if (chance >= 40) return { text: "May confirm", cls: "wl" };
+    return { text: "Unlikely to confirm", cls: "low" };
+  }
+  return { text: "Closed", cls: "low" };
+}
+const seatsLeft = o => { const m = /(\d+) seats?/.exec(friendly(o.status)[0]); return m ? +m[1] : null; };
+function renderPlan() {
+  if (!journey || plan.id !== searchId) return;
+  const box = $("plan");
+  const loading = !plan.bestDone || plan.conn === null || plan.nearby === null || plan.dates === null;
+  const best = plan.best.filter(o => o.score > 0).sort((a, b) => fresh(b) - fresh(a));
+  const nowIst = new Date(Date.now() + 330 * 60000), today = nowIst.toISOString().slice(0, 10), mins = nowIst.getUTCHours() * 60 + nowIst.getUTCMinutes();
+  const tomorrow = tomorrowIso();
+  let head = null, action = null;
+  const open = (o, label) => h("button", { type: "button", class: "btn", onclick: e => openDrawer(o, e.currentTarget) }, label);
+  const confirmed = best.find(o => o.level === "available"), rac = best.find(o => o.level === "rac");
+  const connOk = (plan.conn || []).find(c => c.legs.every(l => l.level === "available" || l.level === "rac"));
+  const nearOk = (plan.nearby || []).find(o => o.level === "available" || o.level === "rac");
+  const likely = best.find(o => o.level === "waitlist" && o.chance !== null && o.chance >= 70);
+  const dayOk = (plan.dates || []).find(d => !d.selected && d.best && (d.best.level === "available" || d.best.level === "rac"));
+  if (confirmed) {
+    const n = seatsLeft(confirmed);
+    head = { tone: "ok", title: `Book now: ${confirmed.train} ${confirmed.train_name}, ${confirmed.cls}`,
+      text: `${n ? `${n} seat${n === 1 ? "" : "s"} showing` : "Seats showing"} for ${confirmed.book_from} to ${confirmed.book_to}. ${confirmed.how === "Book as searched" ? "" : confirmed.how + ". "}${n !== null && n <= 10 ? "Few are left, so book soon." : ""}` };
+    action = open(confirmed, "See how to book");
+  } else if (rac) {
+    head = { tone: "rac", title: `Book RAC now: ${rac.train} ${rac.train_name}, ${rac.cls}`, text: `RAC lets you board and share a side berth; it usually becomes a full berth by the chart. ${rac.how === "Book as searched" ? "" : rac.how + "."}` };
+    action = open(rac, "See how to book");
+  } else if (connOk) {
+    const [l1, l2] = connOk.legs;
+    head = { tone: "ok", title: `Two trains with seats, changing at ${stName(connOk.hub)}`,
+      text: `${l1.train} ${l1.train_name} (${l1.cls}, ${l1.label}) from ${l1.from} at ${l1.depart} to ${connOk.hub}, then ${l2.train} ${l2.train_name} (${l2.cls}, ${l2.label}) at ${l2.depart}. ${hhmm(connOk.gap)} to change, ${hhmm(connOk.total_min)} in all. Two separate tickets.` };
+    action = h("button", { type: "button", class: "btn", onclick: () => $("conn").scrollIntoView({ behavior: "smooth" }) }, "See the connection");
+  } else if (nearOk) {
+    head = { tone: "ok", title: `Seats from ${stName(nearOk.station)}, about ${nearOk.km} km away`, text: `${nearOk.train} ${nearOk.train_name} in ${nearOk.cls} shows ${nearOk.label}. It does not stop at your station, so you would travel to ${stName(nearOk.station)} first.` };
+    action = h("button", { type: "button", class: "btn", onclick: () => { $("origin").value = nearOk.station; showName("origin"); $("form").requestSubmit(); window.scrollTo({ top: 0 }); } }, `Search from ${nearOk.station}`);
+  } else if (likely) {
+    head = { tone: "wl", title: `Best bet: ${likely.train} ${likely.train_name}, ${likely.cls}, ${Math.round(likely.chance)}% chance`, text: `No confirmed seats yet. This waitlist (${friendly(likely.status)[0]}) is likely to confirm. Book it, then set an alert so you hear if it changes.` };
+    action = open(likely, "See how to book");
+  } else if (dayOk) {
+    head = { tone: "wl", title: `Seats on ${dayLabel(dayOk.date)} instead`, text: `Nothing confirmed on your date. ${dayOk.best.train} ${dayOk.best.train_name || ""} in ${dayOk.best.cls} shows ${dayOk.best.label} on ${dayLabel(dayOk.date)}.` };
+    action = h("button", { type: "button", class: "btn", onclick: () => { $("date").value = dayOk.date; $("form").requestSubmit(); } }, `Search ${dayLabel(dayOk.date)}`);
+  } else if (!loading) {
+    const top = best[0];
+    head = { tone: "low", title: "No confirmed seat right now", text: top ? `The best is ${top.train} ${top.cls} at ${friendly(top.status)[0]}${top.chance !== null ? ` (${Math.round(top.chance)}% chance)` : ""}. The tips below are your best moves.` : "Every train and class is closed for your stations. The tips below are your best moves." };
+    if (top) action = open(top, "See the best waitlist");
+  }
+  // timing tips that matter for short-notice travel
+  const tips = [];
+  if (journey.date === tomorrow && mins < 660) tips.push([`Tatkal for tomorrow opens today at ${mins < 600 ? "10:00 for AC and " : ""}11:00${mins < 600 ? " for sleeper and seats" : " for sleeper and seats (AC opened at 10:00)"}. It is often the best chance of a confirmed berth at short notice.`, h("button", { type: "button", class: "btn ghost sm", onclick: () => openChecklist() }, "Tatkal checklist")]);
+  else if (journey.date === tomorrow) tips.push(["Tatkal for tomorrow has opened. Seats go fast, but cancelled Tatkal berths reappear, so look again during the day.", null]);
+  if (journey.date === today) tips.push(["For travel today, charts are out for most trains. Berths left after the chart are sold as current booking until about 30 minutes before departure; look under Book Ticket on IRCTC.", null]);
+  // chart timing only for the waitlist we are pointing at, not some other train
+  const ref = confirmed || rac || connOk || nearOk ? null : likely || best[0];
+  const chart = ref && (timelines[ref.train] || []).find(e => /First chart/.test(e.label) && e.at && e.at > Date.now());
+  if (chart) tips.push([`The first chart for ${ref.train} is due around ${chart.when}. Waitlisted e-tickets that do not confirm are then cancelled and refunded, and leftover berths go on sale as current booking. Check again then.`, null]);
+  if (ref && ref.level === "waitlist") tips.push(["Set an alert on a waitlisted option to get a notification when it moves, and before Tatkal and chart time.", null]);
+  if (!head && !tips.length) { box.replaceChildren(loading ? h("div", { class: "card plan" }, h("div", { class: "t2" }, h("span", { class: "spin inline" }), "Working out your best move…")) : ""); return; }
+  box.replaceChildren(h("section", { class: "card plan tone-" + (head ? head.tone : "wl"), "aria-live": "polite" },
+    h("div", { class: "plan-kicker" }, "What to do", loading ? h("span", { class: "t2" }, h("span", { class: "spin inline" }), "still checking other options") : null),
+    head ? [h("h2", { class: "plan-title" }, head.title), h("p", { class: "plan-text" }, head.text), action ? h("div", { class: "actions" }, action) : null] : null,
+    // a seat that needs extra effort (two trains, another station, another day) versus a likely waitlist on one train: show both
+    head && likely && (connOk || nearOk || dayOk) && !confirmed && !rac ? h("div", { class: "plan-alt" },
+      h("span", {}, `Or stay on one train: ${likely.train} ${likely.train_name}, ${likely.cls}, ${friendly(likely.status)[0]} with a ${Math.round(likely.chance)}% chance of confirming.`),
+      h("button", { type: "button", class: "btn ghost sm", onclick: e => openDrawer(likely, e.currentTarget) }, "See it")) : null,
+    tips.length ? h("ul", { class: "plan-tips" }, tips.map(([t, b]) => h("li", {}, h("span", {}, t), b))) : null));
 }
 
 /* ---------- alerts: browser notifications when a watched option changes ---------- */
@@ -454,6 +532,7 @@ async function findNearby(id) {
     const d = await post("/api/nearby", journey);
     if (id !== searchId) return;
     updateQuota(d.quota);
+    plan.nearby = d.options || []; renderPlan();
     if (!d.stations.length || !d.options.length) return;
     const kids = [h("h2", { class: "h2" }, "Start from a nearby station",
       h("small", {}, d.stations.map(s => `${stName(s.code)} ${s.km} km`).join(", ") + ", straight-line distance"))];
@@ -478,6 +557,7 @@ async function findDates(id) {
     const d = await post("/api/dates", journey);
     if (id !== searchId) return;
     updateQuota(d.quota);
+    plan.dates = d.days || []; renderPlan();
     if (d.days.length < 2) return;
     $("dates").replaceChildren(h("h2", { class: "h2" }, "Nearby dates", h("small", {}, "best option each day for your stations")),
       h("div", { class: "days" }, d.days.map(day => {
@@ -507,6 +587,7 @@ async function findConnections(id) {
     const d = await post("/api/connections", journey);
     if (id !== searchId) return;
     updateQuota(d.quota);
+    plan.conn = d.connections || []; renderPlan();
     if (!d.hubs.length) return;
     const hubs = d.hubs.map(c => `${stName(c)} (${c})`).join(" or ");
     const kids = [h("h2", { class: "h2" }, "Change trains", h("small", {}, `via ${hubs}`))];
@@ -574,6 +655,7 @@ function optRow(o, i, clickable) {
     h("span", { class: "c-book" }, h("div", { class: "pair", title: `${stName(o.book_from)} to ${stName(o.book_to)}` }, o.book_from, h("span", { class: "arrow" }, "→"), o.book_to),
       h("div", { class: "t2" }, `${shortDate(o.book_date)}  ·  ${o.cls}  ·  ${o.quota === "TQ" ? "Tatkal" : "General"}`)),
     h("span", { class: "c-status" }, h("span", { class: "st " + o.level, title: o.status }, label, wlType ? h("small", { class: "wlt" }, wlType) : null),
+      h("span", { class: "verdict v-" + verdict(o.level, o.chance).cls }, verdict(o.level, o.chance).text),
       h("div", { class: "t2" + (isStale(o.as_of) ? " stale" : "") }, [o.chance !== null ? `${Math.round(o.chance)}% chance` : "", age(o.as_of), isStale(o.as_of) ? "may have changed" : ""].filter(Boolean).join("  ·  "))),
     h("span", { class: "fare" }, fareCell(o.fare)),
     h("span", { class: "chev", "aria-hidden": "true" }, clickable ? "›" : ""),
