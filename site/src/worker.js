@@ -25,7 +25,8 @@ function journey(body, now) {
   const today = istToday(now);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(on) || isNaN(Date.parse(on))) throw new BadRequest("Pick a journey date.");
   if (on < today || on > addDays(today, 62)) throw new BadRequest("The journey date must be between today and about 60 days from now.");
-  return { origin, dest, on };
+  const train = String(body.train || "").trim().toUpperCase();
+  return TRAIN.test(train) ? { origin, dest, on, train } : { origin, dest, on };
 }
 
 async function visitorAllowed(request, env, now, prefix = "v", limit = num(env, "VISITOR_DAILY_LIVE", 300)) {

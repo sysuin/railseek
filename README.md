@@ -96,6 +96,11 @@ cd site && npm run deploy
   (`migrations/0003_route_alerts.sql`).
 - When no train seat is likely, the plan card links to flights from the nearest airports (within
   220 km of each end, from a built-in list) and to a bus search.
+- An optional Train box searches one train: its stops become the From/To suggestions, results,
+  best options and nearby dates are limited to it, and a clear message explains when it does not
+  serve the pair (wrong direction, or not running that day). Links carry `&train=`.
+- The booking sheet estimates the refund at each cancellation window (more than 72 h, 72-24 h,
+  24-8 h, under 8 h) for the group, marking the current one, from the April 2026 rules.
 - Caches and politeness counters use Cloudflare's Cache API, because free KV allows only 1,000
   writes a day. Those counters are per Cloudflare location, so the caps are approximate. KV is kept
   for the strict RapidAPI allowance.

@@ -294,3 +294,9 @@ ol.route em { font-style: normal; font-weight: 700; color: var(--accent); font-s
 @media (max-width: 860px) { .opt > .c-status .verdict { margin-top: 0; } .plan-tips li { flex-direction: column; } .plan-tips li::before { display: none; } }
 .plan-alt { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; margin-top: 12px; padding: 10px 12px; background: var(--surface-2); border-radius: 8px; font-size: 14px; }
 .linkrow { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.trainno { width: 92px !important; height: 32px !important; }
+
+table.refund { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.refund td { padding: 7px 10px; border-top: 1px solid var(--border); }
+table.refund td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.refund tr.now { background: var(--accent-soft); }

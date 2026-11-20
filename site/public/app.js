@@ -44,8 +44,14 @@ function updateQuota(q) { if (q) { Object.assign(meta, q); setMode(demo); } }
 /* ---------- form ---------- */
 /* ---------- stations: search by name or code ---------- */
 const byCode = () => stations && (byCode.map || (byCode.map = new Map(stations)));
+let trainInfo = null;   // the route of the train typed in the Train box, if any
 function matches(q) {
   q = q.trim().toUpperCase();
+  if (trainInfo && (!q || q.length < 2)) return trainInfo.stops.slice(0, 8).map(s => [s.code, s.name]);
+  if (trainInfo) {
+    const own = trainInfo.stops.filter(s => s.code.startsWith(q) || s.name.toUpperCase().includes(q)).map(s => [s.code, s.name]);
+    if (own.length) return own.slice(0, 8);
+  }
   if (!q || !stations) return [];
   const exact = [], code = [], starts = [], has = [];
   for (const s of stations) {
@@ -127,12 +133,29 @@ async function init() {
     const on = p.get("date") || "";
     if (/^\d{4}-\d{2}-\d{2}$/.test(on) && on >= meta.today && on <= meta.max_date) d.value = on;
     if (p.get("quota") === "TQ" || p.get("quota") === "GN") $("quota").value = p.get("quota");
+    if (/^\d{5}$/.test(p.get("train") || "")) { $("train").value = p.get("train"); loadTrain(); }
     await stationsReady;
     $("form").requestSubmit();
   }
 }
 $("mode-live").addEventListener("click", () => setMode(false));
 $("mode-demo").addEventListener("click", () => setMode(true));
+async function loadTrain() {
+  const no = $("train").value.trim();
+  trainInfo = null; $("train-hint").textContent = "";
+  if (!no) return;
+  if (!/^\d{5}$/.test(no)) { $("train-hint").textContent = "Train numbers have 5 digits."; return; }
+  $("train-hint").textContent = "Looking up…";
+  try {
+    const r = await post("/api/route", { train: no, demo });
+    if ($("train").value.trim() !== no) return;
+    trainInfo = r;
+    const a = r.stops[0], b = r.stops[r.stops.length - 1];
+    $("train-hint").textContent = `${r.name || no}: ${a.code} → ${b.code}, ${r.stops.length} stops. Pick From and To from its stops.`;
+  } catch (e) { $("train-hint").textContent = e.message; }
+}
+$("train").addEventListener("change", loadTrain);
+$("train").addEventListener("input", () => { if (/^\d{5}$/.test($("train").value.trim())) loadTrain(); else if (!$("train").value.trim()) { trainInfo = null; $("train-hint").textContent = ""; } });
 $("swap").addEventListener("click", () => { const a = $("origin").value; $("origin").value = $("dest").value; $("dest").value = a; showName("origin"); showName("dest"); });
 $("quota").addEventListener("change", () => { if (journey && lastTrains) { journey.quota = $("quota").value; renderTrains(lastTrains);
   try { history.replaceState(null, "", "?" + new URLSearchParams({ from: journey.origin, to: journey.dest, date: journey.date, quota: journey.quota })); } catch (e) {} $("out").replaceChildren(); last = null; } });
@@ -159,18 +182,32 @@ $("form").addEventListener("submit", async e => {
   const go = $("go"); go.disabled = true; go.replaceChildren(h("span", { class: "spin" }), "Finding");
   const id = ++searchId; for (const s of ["best", "dates", "conn", "nearby", "plan"]) $(s).replaceChildren();
   plan = { id, best: [], bestDone: false, conn: null, nearby: null, dates: null, air: null };
-  journey = { origin: from, dest: to, date: $("date").value, quota: $("quota").value, demo };
+  const trainNo = /^\d{5}$/.test($("train").value.trim()) ? $("train").value.trim() : "";
+  journey = { origin: from, dest: to, date: $("date").value, quota: $("quota").value, demo, ...(trainNo ? { train: trainNo } : {}) };
   try {
     const data = await post("/api/trains", journey);
+    if (trainNo) {
+      // one train only: keep it, and explain if it does not serve this pair on this date
+      const all = data.trains;
+      data.trains = all.filter(t => t.number === trainNo);
+      if (!data.trains.length) {
+        const stops = trainInfo && trainInfo.number === trainNo ? trainInfo.stops.map(s => s.code) : [];
+        const fi = stops.indexOf(from), ti = stops.indexOf(to);
+        banner("warn", fi >= 0 && ti >= 0 && fi < ti ? `Train ${trainNo} stops at ${from} and ${to} but does not run from ${from} on ${journey.date}. Try another date.`
+          : fi >= 0 && ti >= 0 ? `Train ${trainNo} runs from ${to} towards ${from}, not the other way. Swap the stations, or look for its return train.`
+          : `Train ${trainNo} does not run from ${from} to ${to}.${stops.length ? ` Its stops include ${stops.slice(0, 12).join(", ")}${stops.length > 12 ? " and more" : ""}.` : ""}`);
+      }
+      plan.conn = []; plan.nearby = [];
+    }
     updateQuota(data.quota);
     last = null; $("out").replaceChildren();
     lastTrains = data;
-    try { history.replaceState(null, "", "?" + new URLSearchParams({ from, to, date: journey.date, quota: journey.quota })); } catch (e) {}
+    try { history.replaceState(null, "", "?" + new URLSearchParams({ from, to, date: journey.date, quota: journey.quota, ...(trainNo ? { train: trainNo } : {}) })); } catch (e) {}
     renderTrains(data);
     rememberSearch(journey);   // Tatkal timing now appears in the plan card
-    findBest(data).then(() => { if (id === searchId) findConnections(id); });
+    findBest(data).then(() => { if (id === searchId && !trainNo) findConnections(id); });
     findDates(id);
-    findNearby(id);
+    if (!trainNo) findNearby(id);
     groupNotes();
   } catch (err) {
     banner("err", err.message); refreshMeta();
@@ -735,6 +772,8 @@ function openDrawer(o, from) {
     ? [h("div", { class: "banner warn" }, `Two separate tickets on the same train. You may have to move to another berth at ${o.sheets[0].fields.find(f => f.label === "To").value}, and each ticket confirms on its own.`),
        ...o.sheets.map((sh, i) => sheetBlock(sh, `Ticket ${i + 1}: enter on IRCTC`))]
     : [sheetBlock(s)];
+  const refund = refundBlock(o);
+  if (refund) body.push(refund);
   body.push(h("div", { id: "d-route" }));
   body.push(h("div", { id: "d-hist" }));
   body.push(h("h3", {}, "Be ready"), h("ul", { class: "plain ready" }, s.checklist.map(x => h("li", {}, h("label", {}, h("input", { type: "checkbox" }), h("span", {}, x))))));
@@ -753,6 +792,27 @@ function openDrawer(o, from) {
   $("d-close").focus();
   const hist = $("d-hist"); if (hist) { hist.dataset.for = o.id; showHistory(o); }
 }
+/* ---------- what you get back if you cancel, by time before departure (rules from April 2026) ---------- */
+const FLAT = { "1A": 240, EC: 240, EA: 240, "2A": 200, FC: 200, "3A": 180, "3E": 180, CC: 180, SL: 120, "2S": 60 };
+function refundBlock(o) {
+  if (o.sheets.length > 1 || !o.fare) return null;
+  const n = pax(), fare = o.fare, flat = FLAT[o.cls] || 120;
+  if (o.quota === "TQ") return h("div", {}, h("h3", {}, "If you cancel"), h("p", { class: "t2" }, "A confirmed Tatkal ticket gives no refund. A waitlisted Tatkal ticket that does not confirm is cancelled and refunded at the chart."));
+  if (o.level === "waitlist") return h("div", {}, h("h3", {}, "If you cancel"), h("p", { class: "t2" }, "If this e-ticket is still waitlisted when the chart is made, it is cancelled and refunded automatically, less a small clerkage fee. Cancelling it yourself earlier costs about the same."));
+  const dep = ((last && last.timelines[o.train]) || timelines[o.train] || []).find(e => /^Train leaves/.test(e.label));
+  const hoursLeft = dep && dep.at ? (dep.at - Date.now()) / 3600000 : null;
+  const rows = [
+    [">72", "More than 72 hours before departure", fare - flat, hoursLeft === null || hoursLeft > 72],
+    ["72-24", "72 to 24 hours before", fare - Math.max(fare * 0.25, flat), hoursLeft !== null && hoursLeft <= 72 && hoursLeft > 24],
+    ["24-8", "24 to 8 hours before", fare - Math.max(fare * 0.5, flat), hoursLeft !== null && hoursLeft <= 24 && hoursLeft > 8],
+    ["<8", "Less than 8 hours before", 0, hoursLeft !== null && hoursLeft <= 8],
+  ];
+  return h("div", {}, h("h3", {}, "If you cancel"),
+    h("table", { class: "refund" }, h("tbody", {}, rows.map(([, when, back, now]) => h("tr", { class: now && hoursLeft !== null ? "now" : "" },
+      h("td", {}, when, now && hoursLeft !== null ? h("small", {}, " (now)") : null), h("td", {}, back > 0 ? `${rupee(Math.round(back) * n)} back` : "nothing back"))))),
+    h("p", { class: "t2" }, `Estimated from the fare shown (${rupee(fare)}${n > 1 ? ` × ${n}` : ""}) and the cancellation rules in force since April 2026; GST and exact charges can differ slightly.`));
+}
+
 /* ---------- the train's whole route, coach order and ratings ---------- */
 async function showRoute(o, btn) {
   const box = $("d-route");

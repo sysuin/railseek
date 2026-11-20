@@ -63,6 +63,7 @@ export async function flexibleDates(provider, j, now) {
     let trains = [], st = {}, error = "";
     try {
       trains = await provider.trainsBetween(j.origin, j.dest, day);
+      if (j.train) trains = trains.filter(t => t.number === j.train);   // searching one train
       st = provider.classStatuses ? await provider.classStatuses(j.origin, j.dest, day) : {};
     } catch (e) {
       if (!(e instanceof ProviderError)) throw e;
