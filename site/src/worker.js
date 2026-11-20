@@ -5,6 +5,7 @@ import { ALL_CLASSES, ProviderError, addDays, brief, istToday, search, serialize
 import { ConfirmTktProvider, DemoProvider, LiveProvider, Quota } from "./providers.js";
 import { FallbackProvider, connections, flexibleDates, healthCheck, nearbyStarts, tatkalOpen } from "./plans.js";
 import { CacheStore } from "./store.js";
+import { readHistory, recorder } from "./history.js";
 import { AlertError, createAlert, deleteAlert, listAlerts, runAlerts, takeInbox, testAlert } from "./alerts.js";
 
 const CODE = /^[A-Z]{1,6}$/, TRAIN = /^[0-9A-Z]{3,6}$/, QUOTAS = ["GN", "TQ"];
@@ -53,14 +54,14 @@ async function providerFor(request, env, body, now) {
   const quota = await loadQuota(env, now);
   if (body.demo) return { provider: new DemoProvider(now), quota, demo: true };
   if (!(await visitorAllowed(request, env, now))) throw new BadRequest("You have reached today's limit for live searches. Demo data still works.");
-  return liveProvider(env, now, body.__perSearch || num(env, "SEARCH_CAP", 8), quota);
+  return liveProvider(env, now, body.__perSearch || num(env, "SEARCH_CAP", 8), quota, body.__ctx);
 }
 
-async function liveProvider(env, now, perSearch, quota) {
+async function liveProvider(env, now, perSearch, quota, ctx) {
   quota = quota || await loadQuota(env, now);
   const opts = { quota, perSearch, now, base: env.UPSTREAM_BASE };
   if (source(env) === "irctc1") return { provider: new LiveProvider({ ...opts, kv: env.KV, key: env.RAPIDAPI_KEY }), quota, demo: false };
-  const primary = new ConfirmTktProvider({ ...opts, kv: CacheStore.open() });
+  const primary = new ConfirmTktProvider({ ...opts, kv: CacheStore.open(), onFresh: ctx ? recorder(env.DB, ctx) : null });
   const backup = env.RAPIDAPI_KEY ? async () => {
     const q = await rapidQuota(env, now);
     backupQuota = q;
@@ -94,6 +95,15 @@ async function api(request, env, ctx, path) {
     return json(result.ok ? 200 : 503, result);
   }
   if (path.startsWith("/api/alerts/") && request.method === "POST") return alertsApi(request, env, ctx, path, now);
+  if (path === "/api/history" && request.method === "POST") {
+    // saved figures over time for one option; a database read, no call to the data source
+    const b = await readJson(request);
+    const up = v => String((b || {})[v] || "").toUpperCase();
+    if (!b || !TRAIN.test(up("train")) || !CODE.test(up("book_from")) || !CODE.test(up("book_to")) || !/^\d{4}-\d{2}-\d{2}$/.test(String(b.book_date || "")) || !/^[0-9A-Z]{2}$/.test(up("cls")))
+      return json(400, { error: "Bad request" });
+    if (!env.DB) return json(200, { points: [] });
+    return json(200, { points: await readHistory(env.DB, { train: up("train"), book_from: up("book_from"), book_to: up("book_to"), book_date: b.book_date, cls: up("cls") }) });
+  }
   if (request.method !== "POST" || !["/api/trains", "/api/check", "/api/top", "/api/dates", "/api/connections", "/api/nearby"].includes(path)) return json(404, { error: "Not found" });
   if (!(request.headers.get("Content-Type") || "").includes("application/json")) return json(415, { error: "JSON only" });
   const origin = request.headers.get("Origin");
@@ -103,7 +113,8 @@ async function api(request, env, ctx, path) {
   if (!body || typeof body !== "object") return json(400, { error: "Bad request" });
 
   const j = journey(body, now);
-  body.__perSearch = path === "/api/connections" ? 10 : path === "/api/dates" || path === "/api/nearby" ? 6 : null;
+  body.__ctx = ctx;
+  body.__perSearch = path === "/api/connections" || path === "/api/check" ? 10 : path === "/api/dates" || path === "/api/nearby" ? 6 : null;
   const { provider, quota, demo } = await providerFor(request, env, body, now);
   try {
     if (path === "/api/trains") {
@@ -137,7 +148,7 @@ async function api(request, env, ctx, path) {
     const train = String(body.train || "").trim().toUpperCase(), cls = String(body.cls || "").trim().toUpperCase();
     const q = String(body.quota || "GN").toUpperCase();
     if (!TRAIN.test(train) || !ALL_CLASSES.includes(cls) || !QUOTAS.includes(q)) throw new BadRequest("Pick a train and a class.");
-    const req = { ...j, also_from: [], also_to: [], classes: [cls], quotas: [q], trains: [train], upstream: 3, downstream: 1 };
+    const req = { ...j, also_from: [], also_to: [], classes: [cls], quotas: [q], trains: [train], upstream: 3, downstream: 1, splits: 1 };
     const result = await search(provider, req);
     return json(200, { ...serialize(result, req, demo, now), quota: quotaInfo(env, quota) });
   } finally {
@@ -158,7 +169,7 @@ async function alertsApi(request, env, ctx, path, now) {
     // called by the timer Worker only
     const key = request.headers.get("X-Run-Key") || "";
     if (!env.RUN_KEY || key.length !== env.RUN_KEY.length || key !== env.RUN_KEY) return json(403, { error: "Forbidden" });
-    const { provider, quota } = await liveProvider(env, now, 12);
+    const { provider, quota } = await liveProvider(env, now, 12, null, ctx);
     try { return json(200, await runAlerts(env, now, provider)); } finally { ctx.waitUntil(quota.save()); }
   }
   const origin = request.headers.get("Origin");
@@ -167,7 +178,7 @@ async function alertsApi(request, env, ctx, path, now) {
   if (!body) return json(400, { error: "Bad request" });
   try {
     if (name === "create") {
-      const { provider, quota } = await liveProvider(env, now, 3);
+      const { provider, quota } = await liveProvider(env, now, 3, null, ctx);
       try { return json(200, { alert: await createAlert(env, body, now, provider, () => visitorAllowed(request, env, now, "alert", 20)) }); }
       finally { ctx.waitUntil(quota.save()); }
     }

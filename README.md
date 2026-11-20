@@ -59,6 +59,13 @@ cd site && npm run deploy
   last live search in local storage and shows it when offline.
 - A हिंदी / English switch translates the page's own wording (`public/i18n.js`). Station and train
   names, and the booking-sheet sentences written by the server, stay in English.
+- The deeper check on one train also tries one two-ticket split on the same train (ported from the
+  Python engine; the parity test covers it).
+- Waitlist trend: each fresh ConfirmTkt answer saves general-quota figures to D1 (`history` table,
+  one row per option per hour of ConfirmTkt's save time). The booking sheet shows how the waitlist
+  has moved. Rows are removed the day after the journey.
+- Cloudflare Web Analytics (cookie-free) is enabled on the Pages project; the security policy in
+  `public/_headers` allows its beacon.
 - Caches and politeness counters use Cloudflare's Cache API, because free KV allows only 1,000
   writes a day. Those counters are per Cloudflare location, so the caps are approximate. KV is kept
   for the strict RapidAPI allowance.

@@ -185,3 +185,13 @@ import { validEndpoint, vapidAuth } from "../src/push.js";
   assert.equal(JSON.parse(Buffer.from(c, "base64url")).aud, "https://fcm.googleapis.com");
   console.log("alerts OK");
 }
+
+/* ---------- waitlist history rows ---------- */
+import { historyRows } from "../src/history.js";
+{
+  const rows = [{ number: "12801", board: "SSM", alight: "ANVT", gn: { "3A": { a: "RLWL67/WL23", p: 28, f: 1280, d: "2026-11-21", t: "2026-11-20T10:14:02" }, SL: { a: "REGRET", p: 0, f: 480, d: "2026-11-22", t: "2026-11-20T10:14:02" } } }];
+  const out = historyRows("SSM", "NDLS", "2026-11-21", rows);
+  assert.equal(out.length, 1, "only rows for the requested date");
+  assert.deepEqual(out[0], ["12801|SSM|ANVT|2026-11-21|3A|GN", "2026-11-21", Math.floor(Date.parse("2026-11-20T10:14:02+05:30") / 3600000), "RLWL67/WL23", 28]);
+  console.log("history OK");
+}

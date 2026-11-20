@@ -227,7 +227,8 @@ export function ctEntry(e, on) {
 
 export class ConfirmTktProvider {
   name = "confirmtkt";
-  constructor({ kv, quota, perSearch, fetcher, base }) {
+  constructor({ kv, quota, perSearch, fetcher, base, onFresh }) {
+    this.onFresh = onFresh;   // called with each freshly fetched pair, to keep its history
     this.kv = kv; this.quota = quota; this.perSearch = perSearch; this.calls = 0; this.base = base || CT;
     this.fetcher = fetcher || ((url, init) => fetch(url, init));
     this.pairs = new Map();
@@ -264,6 +265,7 @@ export class ConfirmTktProvider {
         gn: trimEntries(r.availabilityCache), tq: trimEntries(r.availabilityCacheTatkal),
       })).filter(r => /^[0-9A-Z]{3,6}$/.test(r.number));
       await this.kv.put(`c:p:${id}`, JSON.stringify(rows), { expirationTtl: TTL.avail });
+      if (this.onFresh) this.onFresh(frm, to, on, rows);
     }
     this.pairs.set(id, rows);
     return rows;

@@ -11,7 +11,7 @@ function h(tag, attrs, ...kids) {
   for (const kid of kids.flat()) if (kid !== null && kid !== undefined && kid !== false) el.append(kid);
   return el;
 }
-const KIND = { "exact": "Direct", "earlier-origin": "Earlier origin", "later-destination": "Later destination", "both-extended": "Extended both ends", "alt-station": "Nearby station" };
+const KIND = { "exact": "Direct", "earlier-origin": "Earlier origin", "later-destination": "Later destination", "both-extended": "Extended both ends", "alt-station": "Nearby station", "split": "Two tickets" };
 const rupee = n => "₹" + new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n);
 const shortDate = iso => new Date(iso + "T00:00:00").toLocaleDateString(window.RS_LOCALE || "en-IN", { day: "numeric", month: "short" });
 function age(stamp) {
@@ -483,10 +483,10 @@ function renderResults(d, t, cls) {
 }
 
 /* ---------- drawer ---------- */
-function sheetBlock(s) {
+function sheetBlock(s, title = "Enter these on IRCTC") {
   const key = new Set(["From", "To", "Date", "Boarding"]);
   return [
-    h("h3", {}, "Enter these on IRCTC"),
+    h("h3", {}, title),
     h("dl", { class: "fields" }, s.fields.map(f => h("div", { class: key.has(f.label) && f.hint ? "key" : "" }, h("dt", {}, f.label),
       h("dd", {}, f.value, f.hint ? h("small", {}, f.hint.replace(/^<-\s*/, "").replace(/^\((.*)\)$/, "$1")) : null)))),
     s.timing.length ? [h("h3", {}, "Timing"), h("ul", { class: "plain" }, s.timing.map(x => h("li", {}, x)))] : null,
@@ -498,7 +498,12 @@ function openDrawer(o, from) {
   lastFocus = from;
   $("d-title").textContent = `${o.train} ${o.train_name}`.trim();
   $("d-sub").textContent = `${KIND[o.kind] || o.kind}  ·  ${o.cls}  ·  ${o.status}`;
-  const s = o.sheets[0], body = [sheetBlock(s)];
+  const s = o.sheets[0];
+  const body = o.sheets.length > 1
+    ? [h("div", { class: "banner warn" }, `Two separate tickets on the same train. You may have to move to another berth at ${o.sheets[0].fields.find(f => f.label === "To").value}, and each ticket confirms on its own.`),
+       ...o.sheets.map((sh, i) => sheetBlock(sh, `Ticket ${i + 1}: enter on IRCTC`))]
+    : [sheetBlock(s)];
+  body.push(h("div", { id: "d-hist" }));
   body.push(h("h3", {}, "Be ready"), h("ul", { class: "plain ready" }, s.checklist.map(x => h("li", {}, h("label", {}, h("input", { type: "checkbox" }), h("span", {}, x))))));
   body.push(h("div", { class: "actions" }, h("a", { class: "btn", href: "https://www.irctc.co.in/nget/train-search", target: "_blank", rel: "noopener noreferrer" }, "Open IRCTC"),
     h("button", { class: "btn ghost", type: "button", onclick: e => share(shareText(o), location.href, e.currentTarget) }, "Share"),
@@ -511,7 +516,30 @@ function openDrawer(o, from) {
   $("d-body").scrollTop = 0;
   $("drawer").classList.add("on"); $("scrim").classList.add("on"); $("drawer").setAttribute("aria-hidden", "false");
   $("d-close").focus();
+  const hist = $("d-hist"); if (hist) { hist.dataset.for = o.id; showHistory(o); }
 }
+// how this option's status has moved, from figures saved during earlier searches
+async function showHistory(o) {
+  if (demo || o.quota !== "GN") return;
+  const leg = o.sheets.length > 1 ? null : o;
+  if (!leg) return;
+  let pts = [];
+  try { pts = (await post("/api/history", { train: o.train, book_from: o.book_from, book_to: o.book_to, book_date: o.book_date, cls: o.cls })).points; } catch (e) { return; }
+  const box = $("d-hist");
+  if (!box || box.dataset.for !== o.id) return;
+  const steps = pts.filter((p, i) => i === 0 || p.status !== pts[i - 1].status);
+  if (steps.length < 2) {
+    box.replaceChildren(h("h3", {}, "Waitlist trend"), h("p", { class: "t2" }, pts.length ? "No change since railseek first saw this option." : "No earlier figures saved yet. They build up as people search."));
+    return;
+  }
+  const when = ms => new Date(ms).toLocaleString(window.RS_LOCALE || "en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const wl = s => { const m = /WL\s*(\d+)\s*$/.exec(s) || /WL(\d+)/.exec(s); return m ? +m[1] : null; };
+  const a = wl(steps[0].status), b = wl(steps[steps.length - 1].status);
+  const summary = a !== null && b !== null ? (b < a ? `Moving: WL ${a} to WL ${b} since ${when(steps[0].at)}.` : b > a ? `Getting longer: WL ${a} to WL ${b} since ${when(steps[0].at)}.` : "Not moving.") : "";
+  box.replaceChildren(h("h3", {}, "Waitlist trend"), summary ? h("p", {}, summary) : null,
+    h("ul", { class: "tl" }, steps.slice(-8).map(p => h("li", {}, h("span", { class: "when" }, when(p.at)), h("span", {}, p.status, p.chance ? h("small", {}, `${Math.round(p.chance)}% chance`) : null)))));
+}
+
 function closeDrawer() {
   $("drawer").classList.remove("on"); $("scrim").classList.remove("on"); $("drawer").setAttribute("aria-hidden", "true");
   if (lastFocus) lastFocus.focus();

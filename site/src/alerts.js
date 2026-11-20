@@ -132,6 +132,7 @@ export async function runAlerts(env, now, provider) {
   await db.batch([
     db.prepare("DELETE FROM alerts WHERE expires < ?").bind(now),
     db.prepare("DELETE FROM inbox WHERE created < ?").bind(now - 2 * 86400000),
+    db.prepare("DELETE FROM history WHERE day < ?").bind(addDays(istToday(now), -1)),
     db.prepare("DELETE FROM subs WHERE id NOT IN (SELECT sub FROM alerts) AND id NOT IN (SELECT sub FROM inbox) AND created < ?").bind(now - 86400000),
   ]);
 

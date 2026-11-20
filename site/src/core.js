@@ -114,6 +114,17 @@ export function planCandidates(hit, stops, req, primary) {
   for (const u of ups) add("earlier-origin", stops[u].code, hit.alight, dateAt(u));
   for (const d of downs) add("later-destination", hit.board, stops[d].code, req.on);
   if (ups.length && downs.length) add("both-extended", stops[ups[0]].code, stops[downs[0]].code, dateAt(ups[0]));
+  // two tickets on the same train, split at a midway station
+  const between = range(b + 1, a);
+  if (req.splits && between.length) {
+    const step = Math.max(1, Math.floor(between.length / (req.splits + 1)));
+    const spaced = between.filter((_, i) => i >= step - 1 && (i - (step - 1)) % step === 0);
+    for (const x of pick(spaced.length ? spaced : between, req.splits)) {
+      const group = `${hit.number}:${stops[x].code}`;
+      add("split-leg", hit.board, stops[x].code, req.on, group);
+      add("split-leg", stops[x].code, hit.alight, dateAt(x), group);
+    }
+  }
   return out;
 }
 
@@ -180,7 +191,18 @@ export async function search(provider, req) {
   }
   if (halted) notes.push(`Stopped early (${halted}); ${skipped} checks were not made.`);
 
-  const options = candidates.filter(c => c.avail).map(c => ({ legs: [c], score: score(c.avail, c.tier), kind: c.kind }));
+  const options = [], groups = new Map();
+  for (const c of candidates) {
+    if (!c.avail) continue;
+    if (c.kind === "split-leg") {
+      const k = [c.split_group, c.cls, c.quota].join("|");
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(c);
+    } else options.push({ legs: [c], score: score(c.avail, c.tier), kind: c.kind });
+  }
+  for (const legs of groups.values())
+    if (legs.length === 2 && legs.every(l => isBookable(l.avail)))
+      options.push({ legs, score: Math.min(...legs.map(l => score(l.avail, l.tier))), kind: "split" });
   options.sort((x, y) => y.score - x.score);
   return { options, notes, trainsFound, checked, skipped, hits: [...hits.values()], schedules };
 }
@@ -316,6 +338,10 @@ export function sheetData(c, stops, now) {
 /* ---------- output for the page ---------- */
 export function how(o, req) {
   const c = o.legs[0], out = [];
+  if (o.kind === "split") {
+    const mid = c.book_to;
+    return `Two tickets on the same train: ${c.book_from}-${mid} and ${mid}-${o.legs[1].book_to}. Berth may change at ${mid}.`;
+  }
   if (c.kind === "earlier-origin" || c.kind === "both-extended") {
     out.push(`Book from ${c.book_from} and set boarding point to ${c.board}`);
     if (c.book_date !== req.on) out.push(`journey date on IRCTC is ${fmtDay(c.book_date, "%d %b")} (when the train leaves ${c.book_from})`);
@@ -330,18 +356,20 @@ export function serialize(result, req, demo, now) {
   const options = result.options.map(o => {
     const c = o.legs[0];
     const rank = Math.min(...o.legs.map(l => RANK[l.avail.kind] || 0));
+    const probs = o.legs.filter(l => l.avail.kind === "WL" && l.avail.probability !== null).map(l => l.avail.probability);
+    const fares = o.legs.map(l => l.avail.fare);
     return {
-      id: `${c.train.number} ${c.cls}/${c.quota} ${c.book_from}-${c.book_to} ${fmtDay(c.book_date, "%d%b")}`,
+      id: o.legs.map(l => `${l.train.number} ${l.cls}/${l.quota} ${l.book_from}-${l.book_to} ${fmtDay(l.book_date, "%d%b")}`).join(" + "),
       level: { 3: "available", 2: "rac", 1: "waitlist" }[rank] || "closed",
       kind: o.kind, train: c.train.number, train_name: c.train.name.trim(), depart: c.train.depart, arrive: c.train.arrive, duration: c.train.duration,
-      cls: c.cls, quota: c.quota, book_from: c.book_from, book_to: c.book_to, book_date: c.book_date, board: c.board, alight: c.alight,
-      status: c.avail.raw || c.avail.kind,
-      chance: c.avail.kind === "WL" && c.avail.probability !== null ? c.avail.probability : null,
-      fare: c.avail.fare,
-      as_of: c.avail.fetched_at,
+      cls: c.cls, quota: c.quota, book_from: c.book_from, book_to: o.legs[o.legs.length - 1].book_to, book_date: c.book_date, board: c.board, alight: c.alight,
+      status: o.legs.map(l => l.avail.raw || l.avail.kind).join(" + "),
+      chance: probs.length ? Math.min(...probs) : null,
+      fare: fares.every(f => f !== null && f !== undefined) ? fares.reduce((x, y) => x + y, 0) : null,
+      as_of: o.legs.map(l => l.avail.fetched_at).filter(Boolean).sort()[0] || "",
       score: o.score,
       how: how(o, req),
-      sheets: [sheetData(c, result.schedules[c.train.number] || null, now)],
+      sheets: o.legs.map(l => sheetData(l, result.schedules[l.train.number] || null, now)),
     };
   });
   const timelines = {};
