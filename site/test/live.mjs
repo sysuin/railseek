@@ -195,3 +195,21 @@ import { historyRows } from "../src/history.js";
   assert.deepEqual(out[0], ["12801|SSM|ANVT|2026-11-21|3A|GN", "2026-11-21", Math.floor(Date.parse("2026-11-20T10:14:02+05:30") / 3600000), "RLWL67/WL23", 28]);
   console.log("history OK");
 }
+
+/* ---------- route alerts ---------- */
+import { describeRouteChange, routeBest } from "../src/alerts.js";
+{
+  const S = (raw, p = null) => { const a = { kind: /AVAIL/.test(raw) ? "AVAILABLE" : /RAC/.test(raw) ? "RAC" : /WL/.test(raw) ? "WL" : "REGRET", raw, count: +(raw.match(/(\d+)$/) || [0, 0])[1], probability: p, fare: null, fetched_at: "" }; return a; };
+  const st = { "12801": { GN: { "3A": S("RLWL40/WL20", 60), SL: S("REGRET") }, TQ: { SL: S("AVAILABLE-0050") } }, "04063": { GN: { "2A": S("GNWL10/WL2", 94), SL: S("AVAILABLE-0004") }, TQ: {} } };
+  let b = routeBest(st, [], "GN", false);
+  assert.equal(b.rank, 3); assert.equal(b.label, "04063 SL: 4 seats"); assert.equal(b.open, 1);
+  b = routeBest(st, ["2A", "3A"], "GN", false);
+  assert.equal(b.rank, 1); assert.equal(b.label, "04063 2A: WL 2", "the waitlist with the better chance");
+  assert.equal(routeBest(st, [], "TQ", false).rank, 3, "Tatkal not open yet: general quota is used");
+  assert.equal(routeBest(st, [], "TQ", true).label, "12801 SL: 50 seats");
+  const a = { book_from: "SSM", book_to: "NDLS", book_date: "2026-11-25", rank: 1, label: "04063 2A: WL 2" };
+  assert.match(describeRouteChange(a, routeBest(st, [], "GN", false)).title, /^Seats on SSM-NDLS/);
+  assert.equal(describeRouteChange(a, { rank: 1, label: "x" }), null);
+  assert.match(describeRouteChange({ ...a, rank: 3, label: "04063 SL: 4 seats" }, { rank: 1, label: "04063 2A: WL 2" }).title, /^Seats gone/);
+  console.log("route alerts OK");
+}

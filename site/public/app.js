@@ -158,7 +158,7 @@ $("form").addEventListener("submit", async e => {
   busy = true; save();
   const go = $("go"); go.disabled = true; go.replaceChildren(h("span", { class: "spin" }), "Finding");
   const id = ++searchId; for (const s of ["best", "dates", "conn", "nearby", "plan"]) $(s).replaceChildren();
-  plan = { id, best: [], bestDone: false, conn: null, nearby: null, dates: null };
+  plan = { id, best: [], bestDone: false, conn: null, nearby: null, dates: null, air: null };
   journey = { origin: from, dest: to, date: $("date").value, quota: $("quota").value, demo };
   try {
     const data = await post("/api/trains", journey);
@@ -433,6 +433,15 @@ function renderPlan() {
   const ref = confirmed || rac || connOk || nearOk ? null : likely || best[0];
   const chart = ref && (timelines[ref.train] || []).find(e => /First chart/.test(e.label) && e.at && e.at > Date.now());
   if (chart) tips.push([`The first chart for ${ref.train} is due around ${chart.when}. Waitlisted e-tickets that do not confirm are then cancelled and refunded, and leftover berths go on sale as current booking. Check again then.`, null]);
+  // no seat on any train: other ways to make the trip
+  if (!confirmed && !rac && !connOk && !nearOk && !likely && plan.air) {
+    const a = plan.air, q = (f, t) => `https://www.google.com/travel/flights?q=${encodeURIComponent(`Flights from ${f} to ${t} on ${journey.date}`)}`;
+    tips.push([`No likely train seat? Flights to ${a.to.city} (${a.to.code}) leave from ${a.from.map(x => `${x.city} (${x.code}, ${x.km} km away)`).join(" or ")}. Buses are worth a look too.`,
+      h("span", { class: "linkrow" }, ...a.from.map(x => h("a", { class: "btn ghost sm", href: q(x.code, a.to.code), target: "_blank", rel: "noopener noreferrer" }, `Flights from ${x.code}`)),
+        h("a", { class: "btn ghost sm", href: `https://www.google.com/search?q=${encodeURIComponent(`bus ${stName(journey.origin)} to ${stName(journey.dest)} ${journey.date}`)}`, target: "_blank", rel: "noopener noreferrer" }, "Buses"))]);
+  }
+  if (!confirmed && !rac && head) tips.push(["Watch this route: get a notification as soon as any train shows confirmed or RAC seats for your stations.",
+    h("button", { type: "button", class: "btn ghost sm", onclick: e => addRouteAlert(e.currentTarget) }, "Watch for seats")]);
   if (ref && ref.level === "waitlist") tips.push(["Set an alert on a waitlisted option to get a notification when it moves, and before Tatkal and chart time.", null]);
   if (!head && !tips.length) { box.replaceChildren(loading ? h("div", { class: "card plan" }, h("div", { class: "t2" }, h("span", { class: "spin inline" }), "Working out your best move…")) : ""); return; }
   box.replaceChildren(h("section", { class: "card plan tone-" + (head ? head.tone : "wl"), "aria-live": "polite" },
@@ -480,6 +489,18 @@ async function addAlert(o, btn) {
     banner("err", e.message || "Could not set the alert."); closeDrawer();
   }
 }
+async function addRouteAlert(btn) {
+  if (demo) { btn.textContent = "Switch to live data for alerts"; return; }
+  if (!pushReady()) { banner("warn", alertUnsupported()); return; }
+  btn.disabled = true; btn.textContent = "Setting alert";
+  const classes = prefs.cls === "ac" ? ["1A", "2A", "3A", "3E", "CC", "EC"] : prefs.cls === "nonac" ? ["SL", "2S"] : [];
+  try {
+    const sub = await pushSub(true);
+    await post("/api/alerts/create", { subscription: sub.toJSON(), route: { origin: journey.origin, dest: journey.dest, date: journey.date, quota: journey.quota, classes } });
+    btn.textContent = "Watching";
+    loadAlerts();
+  } catch (e) { btn.disabled = false; btn.textContent = "Watch for seats"; banner("err", e.message || "Could not set the alert."); }
+}
 async function loadAlerts() {
   if (!pushReady()) return;
   let sub;
@@ -491,10 +512,12 @@ async function loadAlerts() {
   const when = ms => new Date(ms).toLocaleString(window.RS_LOCALE || "en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   $("alerts").replaceChildren(h("h2", { class: "h2" }, "Your alerts", h("small", {}, "checked about every 30 minutes; notifications come to this browser")),
     h("div", { class: "card list" }, list.map(a => h("div", { class: "alertrow" },
-      h("span", {}, h("div", { class: "t1" }, `${a.train} ${a.train_name || ""}`.trim()),
-        h("div", { class: "t2" }, `${a.book_from} → ${a.book_to}  ·  ${shortDate(a.book_date)}  ·  ${a.cls}  ·  ${a.quota === "TQ" ? "Tatkal" : "General"}`),
+      h("span", {}, h("div", { class: "t1" }, a.kind === "route" ? `Any seat, ${a.book_from} → ${a.book_to}` : `${a.train} ${a.train_name || ""}`.trim()),
+        h("div", { class: "t2" }, a.kind === "route"
+          ? [shortDate(a.book_date), a.quota === "TQ" ? "Tatkal" : "General", a.classes ? a.classes.replace(/,/g, " ") : "all classes", a.label ? `best now ${a.label}` : ""].filter(Boolean).join("  ·  ")
+          : `${a.book_from} → ${a.book_to}  ·  ${shortDate(a.book_date)}  ·  ${a.cls}  ·  ${a.quota === "TQ" ? "Tatkal" : "General"}`),
         h("div", { class: "t2" }, [a.tatkal_at ? `Tatkal reminder ${when(a.tatkal_at - 20 * 60000)}` : "", a.chart_at ? `chart reminder ${when(a.chart_at)}` : "", `ends ${when(a.expires)}`].filter(Boolean).join("  ·  "))),
-      h("span", { class: "c-status" }, a.label ? h("span", { class: "st " + (["closed", "waitlist", "rac", "available"][a.rank] || "closed") }, a.label) : null),
+      h("span", { class: "c-status" }, a.label && a.kind !== "route" ? h("span", { class: "st " + (["closed", "waitlist", "rac", "available"][a.rank] || "closed") }, a.label) : null),
       h("button", { type: "button", class: "btn ghost sm", onclick: async e => { e.currentTarget.disabled = true; await post("/api/alerts/delete", { endpoint: sub.endpoint, id: a.id }).catch(() => {}); loadAlerts(); } }, "Remove")))),
     h("div", { class: "actions" }, h("button", { type: "button", class: "btn ghost sm", onclick: async e => {
       const b = e.currentTarget; b.disabled = true;
@@ -532,7 +555,7 @@ async function findNearby(id) {
     const d = await post("/api/nearby", journey);
     if (id !== searchId) return;
     updateQuota(d.quota);
-    plan.nearby = d.options || []; renderPlan();
+    plan.nearby = d.options || []; plan.air = d.airports || null; renderPlan();
     if (!d.stations.length || !d.options.length) return;
     const kids = [h("h2", { class: "h2" }, "Start from a nearby station",
       h("small", {}, d.stations.map(s => `${stName(s.code)} ${s.km} km`).join(", ") + ", straight-line distance"))];

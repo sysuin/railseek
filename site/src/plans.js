@@ -207,6 +207,35 @@ export function nearbyStations(origin, dest, { maxKm = 150, limit = 3 } = {}) {
     .sort((a, b) => a.km - b.km).slice(0, limit);
 }
 
+/* ---------- nearest airports, for a fallback when no train seat is open ---------- */
+const AIRPORTS = [
+  ["DEL", "Delhi", 28.556, 77.100], ["BOM", "Mumbai", 19.089, 72.865], ["BLR", "Bengaluru", 13.199, 77.706], ["MAA", "Chennai", 12.994, 80.171],
+  ["CCU", "Kolkata", 22.654, 88.447], ["HYD", "Hyderabad", 17.240, 78.429], ["PNQ", "Pune", 18.582, 73.920], ["AMD", "Ahmedabad", 23.077, 72.635],
+  ["GOI", "Goa", 15.381, 73.831], ["COK", "Kochi", 10.152, 76.402], ["TRV", "Thiruvananthapuram", 8.482, 76.920], ["JAI", "Jaipur", 26.824, 75.812],
+  ["LKO", "Lucknow", 26.761, 80.889], ["VNS", "Varanasi", 25.452, 82.859], ["PAT", "Patna", 25.591, 85.088], ["GAY", "Gaya", 24.744, 84.951],
+  ["IXR", "Ranchi", 23.314, 85.322], ["BBI", "Bhubaneswar", 20.244, 85.818], ["GAU", "Guwahati", 26.106, 91.586], ["IXB", "Bagdogra", 26.681, 88.329],
+  ["NAG", "Nagpur", 21.092, 79.047], ["IDR", "Indore", 22.722, 75.801], ["BHO", "Bhopal", 23.287, 77.337], ["CCJ", "Kozhikode", 11.137, 75.955],
+  ["CJB", "Coimbatore", 11.030, 77.043], ["IXM", "Madurai", 9.834, 78.093], ["VTZ", "Visakhapatnam", 17.721, 83.224], ["IXC", "Chandigarh", 30.673, 76.789],
+  ["ATQ", "Amritsar", 31.710, 74.797], ["SXR", "Srinagar", 33.987, 74.774], ["DED", "Dehradun", 30.190, 78.180], ["GOP", "Gorakhpur", 26.740, 83.449],
+  ["DBR", "Darbhanga", 26.193, 85.917], ["IXD", "Prayagraj", 25.440, 81.734], ["KNU", "Kanpur", 26.404, 80.410], ["AGR", "Agra", 27.156, 77.961],
+  ["RPR", "Raipur", 21.180, 81.739], ["JDH", "Jodhpur", 26.251, 73.049], ["UDR", "Udaipur", 24.618, 73.896], ["STV", "Surat", 21.114, 72.742],
+  ["IXE", "Mangaluru", 12.961, 74.890], ["VGA", "Vijayawada", 16.530, 80.797], ["TIR", "Tirupati", 13.632, 79.543], ["AYJ", "Ayodhya", 26.748, 82.155],
+  ["DGH", "Deoghar", 24.444, 86.703], ["IXJ", "Jammu", 32.689, 74.837], ["GWL", "Gwalior", 26.293, 78.228], ["JLR", "Jabalpur", 23.178, 80.052],
+];
+export function nearestAirports(code, limit = 2, maxKm = 220) {
+  const p = COORDS[code];
+  if (!p) return [];
+  const rad = x => (x * Math.PI) / 180;
+  const out = [];
+  for (const [iata, city, lat, lng] of AIRPORTS) {
+    const dLat = rad(lat - p[0]), dLng = rad(lng - p[1]);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(p[0])) * Math.cos(rad(lat)) * Math.sin(dLng / 2) ** 2;
+    const km = Math.round(12742 * Math.asin(Math.sqrt(h)));
+    if (km <= maxKm) out.push({ code: iata, city, km });
+  }
+  return out.sort((a, b) => a.km - b.km).slice(0, limit);
+}
+
 export async function nearbyStarts(provider, j, now) {
   const notes = [];
   const direct = new Set((await provider.trainsBetween(j.origin, j.dest, j.on)).map(t => t.number));
@@ -232,7 +261,9 @@ export async function nearbyStarts(provider, j, now) {
   found.sort((a, b) => b.score - a.score || a.km - b.km);
   const seen = new Set(), options = [];
   for (const o of found) { if (!seen.has(o.train)) { seen.add(o.train); options.push(o); } if (options.length === 5) break; }
-  return { stations, options, notes };
+  const from = nearestAirports(j.origin, 2), to = nearestAirports(j.dest, 1);
+  const usable = from.length && to.length && !from.some(a => a.code === to[0].code);
+  return { stations, options, notes, airports: usable ? { from, to: to[0] } : null };
 }
 
 /* ---------- health check ---------- */

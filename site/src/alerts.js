@@ -21,7 +21,7 @@ function view(a, now) {
   return { id: a.id, train: a.train, train_name: a.train_name, cls: a.cls, quota: a.quota, book_from: a.book_from, book_to: a.book_to,
     book_date: a.book_date, board: a.board, origin: a.origin, dest: a.dest, label: a.label, rank: a.rank,
     tatkal_at: a.tatkal_sent ? null : a.tatkal_at, chart_at: a.chart_sent ? null : a.chart_at, expires: a.expires, checked: a.checked || null,
-    expires_label: fmt(a.expires, "%a %d %b, %H:%M"), now };
+    expires_label: fmt(a.expires, "%a %d %b, %H:%M"), kind: a.kind || "option", classes: a.classes || "", now };
 }
 
 async function subFor(db, endpoint, env) {
@@ -31,9 +31,72 @@ async function subFor(db, endpoint, env) {
 }
 
 /* ---------- create ---------- */
+// The best status among every train and chosen class on a station pair, from one saved answer.
+export function routeBest(statuses, classes, quota, withTatkal) {
+  let best = { rank: 0, label: "", train: "", cls: "", open: 0 };
+  for (const [train, q] of Object.entries(statuses || {})) {
+    for (const quotaKey of withTatkal && quota === "TQ" ? ["TQ"] : ["GN"]) {
+      for (const [cls, avail] of Object.entries((q || {})[quotaKey] || {})) {
+        if (classes.length && !classes.includes(cls)) continue;
+        const b = brief(avail);
+        if (!b) continue;
+        const rank = RANK[b.level];
+        if (rank >= 2) best.open++;
+        const better = rank > best.rank || (rank === best.rank && rank === 3 && (avail.count || 0) > (best.count || 0)) ||
+          (rank === best.rank && rank === 1 && (b.chance || 0) > (best.chance || 0));
+        if (better) best = { ...best, rank, label: `${train} ${cls}: ${b.label}`, train, cls, count: avail.count, chance: b.chance };
+      }
+    }
+  }
+  return best;
+}
+
+async function createRouteAlert(env, body, now, provider, ipAllowed, sub) {
+  const db = env.DB, r = body.route || {};
+  const up = v => String(v || "").trim().toUpperCase();
+  const a = { origin: up(r.origin), dest: up(r.dest), book_date: String(r.date || ""), quota: up(r.quota || "GN"),
+    classes: (Array.isArray(r.classes) ? r.classes : []).map(up).filter(c => /^[0-9A-Z]{2}$/.test(c)).slice(0, 8) };
+  if (!CODE.test(a.origin) || !CODE.test(a.dest) || a.origin === a.dest || !["GN", "TQ"].includes(a.quota) || !/^\d{4}-\d{2}-\d{2}$/.test(a.book_date))
+    throw new AlertError("That route cannot be watched.");
+  const today = istToday(now);
+  if (a.book_date < today || a.book_date > addDays(today, 62)) throw new AlertError("That date is outside the booking window.");
+  const [{ n: mine }, { n: total }] = await Promise.all([
+    db.prepare("SELECT COUNT(*) AS n FROM alerts WHERE sub = ?").bind(sub.id).first(),
+    db.prepare("SELECT COUNT(*) AS n FROM alerts").first(),
+  ]);
+  if (mine >= 10) throw new AlertError("You already have 10 alerts. Remove one to add another.");
+  if (total >= (parseInt(env.MAX_ALERTS, 10) || 500)) throw new AlertError("Alerts are full right now. Please try again later.");
+  if (!(await ipAllowed())) throw new AlertError("You have added many alerts today. Please try again tomorrow.");
+  let best = { rank: 0, label: "" };
+  try { best = routeBest(await provider.classStatuses(a.origin, a.dest, a.book_date), a.classes, a.quota, a.book_date <= addDays(today, 1)); }
+  catch (e) { if (!(e instanceof ProviderError)) throw e; }
+  const row = { id: crypto.randomUUID(), sub: sub.id, train: "*", train_name: "", cls: "*", quota: a.quota, book_from: a.origin, book_to: a.dest,
+    book_date: a.book_date, board: a.origin, origin: a.origin, dest: a.dest, rank: best.rank, label: best.label || null, wl: null,
+    tatkal_at: null, tatkal_sent: 1, chart_at: null, chart_sent: 1, expires: Date.parse(`${a.book_date}T23:59:00+05:30`), checked: now, created: now,
+    kind: "route", classes: a.classes.join(",") };
+  await db.batch([
+    db.prepare("INSERT OR IGNORE INTO subs (id, endpoint, created) VALUES (?, ?, ?)").bind(sub.id, sub.endpoint, now),
+    db.prepare(`INSERT INTO alerts (id, sub, train, train_name, cls, quota, book_from, book_to, book_date, board, origin, dest, rank, label, wl,
+      tatkal_at, tatkal_sent, chart_at, chart_sent, expires, checked, created, kind, classes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(row.id, row.sub, row.train, row.train_name, row.cls, row.quota, row.book_from, row.book_to, row.book_date, row.board, row.origin, row.dest,
+        row.rank, row.label, row.wl, row.tatkal_at, row.tatkal_sent, row.chart_at, row.chart_sent, row.expires, row.checked, row.created, row.kind, row.classes),
+  ]);
+  return view(row, now);
+}
+
+export function describeRouteChange(a, best) {
+  const where = `${a.book_from} to ${a.book_to} on ${fmtDay(a.book_date, "%d %b")}`;
+  if (best.rank >= 2 && best.rank > a.rank)
+    return { title: `Seats on ${a.book_from}-${a.book_to}`, body: `${where}: ${best.label}${best.open > 1 ? ` and ${best.open - 1} more option${best.open > 2 ? "s" : ""}` : ""}. Book on IRCTC soon.` };
+  if (a.rank >= 2 && best.rank < 2)
+    return { title: `Seats gone on ${a.book_from}-${a.book_to}`, body: `${where}: no confirmed or RAC seats left. Best now: ${best.label || "nothing open"}.` };
+  return null;
+}
+
 export async function createAlert(env, body, now, provider, ipAllowed) {
   const db = env.DB;
   const sub = await subFor(db, body.subscription && body.subscription.endpoint, env);
+  if (body.route) return createRouteAlert(env, body, now, provider, ipAllowed, sub);
   const o = body.option || {};
   const up = v => String(v || "").trim().toUpperCase();
   const a = { train: up(o.train), cls: up(o.cls), quota: up(o.quota), book_from: up(o.book_from), book_to: up(o.book_to), board: up(o.board || o.book_from),
@@ -162,6 +225,18 @@ export async function runAlerts(env, now, provider) {
   for (const list of groups.values()) {
     if (stopped) break;
     for (const a of list) {
+      if (a.kind === "route") {
+        let st;
+        try { st = await provider.classStatuses(a.book_from, a.book_to, a.book_date); }
+        catch (e) { if (!(e instanceof ProviderError)) throw e; stopped = e.message; break; }
+        checked++;
+        if (!st || !Object.keys(st).length) { writes.push(db.prepare("UPDATE alerts SET checked = ? WHERE id = ?").bind(now, a.id)); continue; }
+        const best = routeBest(st, a.classes ? a.classes.split(",") : [], a.quota, a.book_date <= addDays(istToday(now), 1));
+        const change = describeRouteChange(a, best);
+        if (change) messages.push([a.sub, change.title, change.body, searchUrl(a)]);
+        writes.push(db.prepare("UPDATE alerts SET rank = ?, label = ?, checked = ? WHERE id = ?").bind(best.rank, best.label || null, now, a.id));
+        continue;
+      }
       let avail;
       try { avail = await provider.availability(a.train, a.book_from, a.book_to, a.book_date, a.cls, a.quota); }
       catch (e) { if (!(e instanceof ProviderError)) throw e; stopped = e.message; break; }

@@ -149,6 +149,11 @@
     "For travel today, charts are out for most trains. Berths left after the chart are sold as current booking until about 30 minutes before departure; look under Book Ticket on IRCTC.": "आज की यात्रा के लिए ज़्यादातर ट्रेनों का चार्ट बन चुका है। चार्ट के बाद बची बर्थ रवानगी से लगभग 30 मिनट पहले तक करंट बुकिंग में बिकती हैं; IRCTC पर Book Ticket में देखें।",
     "Set an alert on a waitlisted option to get a notification when it moves, and before Tatkal and chart time.": "प्रतीक्षा सूची वाले विकल्प पर सूचना लगाएँ, ताकि उसके आगे बढ़ने पर और तत्काल व चार्ट से पहले सूचना मिले।",
     "Every train and class is closed for your stations. The tips below are your best moves.": "आपके स्टेशनों के लिए हर ट्रेन और श्रेणी बंद है। नीचे के सुझाव आपके सबसे अच्छे कदम हैं।",
+    "Watch for seats": "सीट पर नज़र रखें",
+    "Watching": "नज़र रख रहे हैं",
+    "Buses": "बसें",
+    "Watch this route: get a notification as soon as any train shows confirmed or RAC seats for your stations.": "इस रास्ते पर नज़र रखें: आपके स्टेशनों के लिए किसी भी ट्रेन में कन्फर्म या RAC सीट दिखते ही सूचना पाएँ।",
+    "all classes": "सभी श्रेणियाँ",
   };
   const P = [
     [/\bin (\d+) h (\d+) min\b/g, "$1 घं $2 मि में"], [/\bin (\d+) min\b/g, "$1 मि में"],
@@ -206,6 +211,8 @@
     [/^Tatkal for AC classes opened at 10:00\. Sleeper and seats open at 11:00 \((.+?)\)\.$/, "AC श्रेणियों का तत्काल 10:00 बजे खुल गया। स्लीपर और सीटों का 11:00 बजे खुलेगा ($1)।"],
     [/^Search (\S+) to (\S+) again$/, "$1 से $2 फिर खोजें"],
     [/^Or stay on one train: (.+), (\S+), (.+) with a (\d+)% chance of confirming\.$/, "या एक ही ट्रेन में रहें: $1, $2, $3, कन्फर्म होने की $4% संभावना।"],
+    [/^Flights from (\S+)$/, "$1 से उड़ानें"], [/^Any seat, (\S+) → (\S+)$/, "कोई भी सीट, $1 → $2"], [/best now /g, "अभी सबसे अच्छा "],
+    [/^No likely train seat\? Flights to (.+?) leave from (.+)\. Buses are worth a look too\.$/, (m, t, f) => `ट्रेन में सीट की उम्मीद कम है? ${t} के लिए उड़ानें ${f.replace(/ km away/g, " किमी दूर").replace(/ or /g, " या ")} से मिलती हैं। बसें भी देख लें।`],
     [/^Book now: (.+), (\S+)$/, "अभी बुक करें: $1, $2"], [/^Book RAC now: (.+), (\S+)$/, "अभी RAC बुक करें: $1, $2"],
     [/^Two trains with seats, changing at (.+)$/, "सीटों वाली दो ट्रेनें, $1 पर बदलकर"], [/^Seats from (.+), about (\d+) km away$/, "$1 से सीटें, लगभग $2 किमी दूर"],
     [/^Best bet: (.+), (\S+), (\d+)% chance$/, "सबसे अच्छा दाँव: $1, $2, $3% संभावना"], [/^Seats on (.+) instead$/, "$1 को सीटें हैं"],

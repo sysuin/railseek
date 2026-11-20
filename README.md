@@ -90,6 +90,12 @@ cd site && npm run deploy
 - Every option carries a plain verdict: confirmed seats, RAC, likely / may / unlikely to confirm.
 - Sections run from the decision down: plan, best options, nearby stations, change trains, nearby
   dates, then all trains.
+- "Watch for seats" in the plan card sets a route alert: one check of the station pair covers every
+  train, so the browser is notified when any train (optionally only AC or only sleeper, following
+  the Class filter) shows confirmed or RAC seats, and again if they disappear
+  (`migrations/0003_route_alerts.sql`).
+- When no train seat is likely, the plan card links to flights from the nearest airports (within
+  220 km of each end, from a built-in list) and to a bus search.
 - Caches and politeness counters use Cloudflare's Cache API, because free KV allows only 1,000
   writes a day. Those counters are per Cloudflare location, so the caps are approximate. KV is kept
   for the strict RapidAPI allowance.
